@@ -168,7 +168,8 @@ class FrameChecker(ast.NodeVisitor):
             if isinstance(target, ast.Subscript):
                 set_assigning(target)
 
-        self.generic_visit(node)
+        # Only visit the value expression to compute results, avoid walking targets
+        self.visit(node.value)
 
         for target in node.targets:
             match target:
@@ -189,7 +190,7 @@ class FrameChecker(ast.NodeVisitor):
 
     @override
     def visit_Import(self, node: ast.Import):
-        self.generic_visit(node)
+        # No need to traverse children for imports
         for alias in node.names:
             if alias.name == "pandas":
                 # Use asname if available, otherwise use the module name
@@ -197,13 +198,13 @@ class FrameChecker(ast.NodeVisitor):
 
     @override
     def visit_Name(self, node):
-        self.generic_visit(node)
+        # Name has no children; skip generic traversal
         if node.id in self.definitions:
             set_result(node, self.definitions[node.id])
 
     @override
     def visit_Subscript(self, node: ast.Subscript):
-        self.generic_visit(node)
+        # Avoid generic traversal; we only need top-level info
 
         # ignore subscript if it is a column assignment
         if is_assigning(node):
@@ -213,7 +214,7 @@ class FrameChecker(ast.NodeVisitor):
             return
 
         frame_id = node.value.id
-        if frame_id not in self.frames.instance_ids():
+        if not self.frames.contains_id(frame_id):
             return
 
         if not isinstance(const := node.slice, ast.Constant) or not isinstance(
@@ -238,7 +239,16 @@ class FrameChecker(ast.NodeVisitor):
 
     @override
     def visit_Call(self, node: ast.Call):
-        self.generic_visit(node)
+        # Visit inner call for chains and visit argument expressions so results are available
+        if isinstance(node.func, ast.Attribute) and isinstance(
+            node.func.value, ast.Call
+        ):
+            self.visit(node.func.value)
+        # Ensure arguments and keyword values are visited so Name results are resolved for parse_args
+        for arg in node.args:
+            self.visit(arg)
+        for kw in node.keywords:
+            self.visit(kw.value)
 
         if isinstance(node.func, ast.Attribute):
             frame_id = None

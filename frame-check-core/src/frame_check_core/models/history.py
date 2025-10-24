@@ -2,6 +2,7 @@ import ast
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import NamedTuple
+from bisect import bisect_left
 
 
 def get_column_values(
@@ -143,30 +144,41 @@ class LineIdKey(NamedTuple):
 @dataclass(kw_only=True, slots=True)
 class InstanceHistory[I: FrameInstance | ColumnInstance]:
     instances: dict[LineIdKey, I] = field(default_factory=dict)
+    _by_id_lines: dict[str, list[int]] = field(default_factory=dict)
+    _ids: set[str] = field(default_factory=set)
 
     def add(self, instance: I):
         key = LineIdKey(instance.lineno, instance.id)
         self.instances[key] = instance
+        # index by id and lineno
+        self._ids.add(key.id)
+        lines = self._by_id_lines.setdefault(key.id, [])
+        i = bisect_left(lines, key.lineno)
+        if i == len(lines) or lines[i] != key.lineno:
+            lines.insert(i, key.lineno)
 
     def get(self, id: str | None) -> list[I]:
-        return [instance for instance in self.instances.values() if instance.id == id]
+        if id is None:
+            return []
+        lines = self._by_id_lines.get(id, [])
+        return [self.instances[LineIdKey(line, id)] for line in lines]
 
     def get_at(self, lineno: int, id: str) -> I | None:
         return self.instances.get(LineIdKey(lineno, id))
 
     def get_before(self, lineno: int, id: str) -> I | None:
-        # Filter only keys with matching id first (dictionary lookup is O(1))
-        matching_keys = [k for k in self.instances.keys() if k.id == id]
-
-        # Then sort only those keys
-        matching_keys.sort(key=lambda k: k.lineno, reverse=True)
-        for key in matching_keys:
-            if key.lineno < lineno:
-                return self.instances[key]
+        lines = self._by_id_lines.get(id)
+        if not lines:
+            return None
+        # find rightmost line < lineno
+        i = bisect_left(lines, lineno) - 1
+        if i >= 0:
+            key = LineIdKey(lines[i], id)
+            return self.instances.get(key)
         return None
 
     def instance_ids(self) -> set[str]:
-        return {instance.id for instance in self.instances.values()}
+        return set(self._ids)
 
     def values(self) -> list[I]:
         return list(self.instances.values())
@@ -176,6 +188,11 @@ class InstanceHistory[I: FrameInstance | ColumnInstance]:
 
     def __setitem__(self, key: LineIdKey, value: I):
         self.instances[key] = value
+        self._ids.add(key.id)
+        lines = self._by_id_lines.setdefault(key.id, [])
+        i = bisect_left(lines, key.lineno)
+        if i == len(lines) or lines[i] != key.lineno:
+            lines.insert(i, key.lineno)
 
     def __getitem__(self, key: LineIdKey) -> I:
         return self.instances[key]
@@ -184,7 +201,7 @@ class InstanceHistory[I: FrameInstance | ColumnInstance]:
         return item in self.instances
 
     def contains_id(self, id: str) -> bool:
-        return id in self.instance_ids()
+        return id in self._ids
 
 
 FrameHistory = InstanceHistory[FrameInstance]

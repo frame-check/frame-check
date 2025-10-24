@@ -24,25 +24,55 @@ def set_assigning(node: ast.Subscript) -> None:
 
 
 def get_value(node: ast.AST) -> Result:
+    # Fast, shallow extraction to avoid deep recursion:
+    # - Strings are returned directly
+    # - Lists of string constants are returned as a list[str]
+    # - Dicts with string keys and shallow-parsable values are returned
+    #   - Values are either string constants or lists of string constants
+    # - Everything else is Unknown
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
-    elif isinstance(node, ast.List):
-        elements = []
+
+    if isinstance(node, ast.List):
+        values: list[str] = []
         for elt in node.elts:
-            parsed_elt = get_result(elt)
-            elements.append(parsed_elt)
-        return elements
-    elif isinstance(node, ast.Dict):
-        result_dict = {}
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                values.append(elt.value)
+            else:
+                return Unknown
+        return values
+
+    if isinstance(node, ast.Dict):
+        result_dict: dict[str, Result] = {}
         for key_node, value_node in zip(node.keys, node.values):
             if key_node is None:
                 continue
-            key = get_result(key_node)
-            value = get_result(value_node)
+            if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                key = key_node.value
+            else:
+                return Unknown
+
+            # Shallow parse values without recursion
+            if isinstance(value_node, ast.Constant) and isinstance(
+                value_node.value, str
+            ):
+                value: Result = value_node.value
+            elif isinstance(value_node, ast.List):
+                vals: list[str] | None = []
+                for elt in value_node.elts:
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                        vals.append(elt.value)
+                    else:
+                        vals = None
+                        break
+                value = vals if vals is not None else Unknown
+            else:
+                value = Unknown
+
             result_dict[key] = value
         return result_dict
-    else:
-        return Unknown
+
+    return Unknown
 
 
 def get_result(node: ast.AST) -> Result:
@@ -59,9 +89,31 @@ def set_result(node: ast.AST, result: Result) -> None:
 def parse_args(
     args: list[ast.expr],
     keywords: list[ast.keyword],
+    arg_indices: set[int] | None = None,
+    keyword_names: set[str] | None = None,
 ) -> tuple[list[Result], dict[str, Result]]:
-    argsv = [get_result(arg) for arg in args]
-    keywordsv = {kw.arg: get_result(kw.value) for kw in keywords if kw.arg is not None}
+    # Targeted parsing to optionally limit work:
+    # - If arg_indices is provided, only parse those positional args; others become Unknown
+    # - If keyword_names is provided, only parse those keywords; others are skipped
+    if arg_indices is None:
+        argsv = [get_result(arg) for arg in args]
+    else:
+        argsv = [
+            get_result(arg) if i in arg_indices else Unknown
+            for i, arg in enumerate(args)
+        ]
+
+    if keyword_names is None:
+        keywordsv = {
+            kw.arg: get_result(kw.value) for kw in keywords if kw.arg is not None
+        }
+    else:
+        keywordsv = {
+            kw.arg: get_result(kw.value)
+            for kw in keywords
+            if kw.arg is not None and kw.arg in keyword_names
+        }
+
     return argsv, keywordsv
 
 
@@ -112,14 +164,20 @@ class PDMethod:
         self.func = func
 
     def __call__(
-        self, args: list[ast.expr], keywords: list[ast.keyword]
+        self,
+        args: list[ast.expr],
+        keywords: list[ast.keyword],
+        arg_indices: set[int] | None = None,
+        keyword_names: set[str] | None = None,
     ) -> PDMethodResult:
         """
         Returns a tuple with two elements:
         - The first element is the created dataframe, if any.
         - The second element is an `IllegalAccess` instance representing an error if the method call is illegal, or `None` if there is no error.
         """
-        argsv, keywordsv = parse_args(args, keywords)
+        argsv, keywordsv = parse_args(
+            args, keywords, arg_indices=arg_indices, keyword_names=keyword_names
+        )
         returned, error = self.func(argsv, keywordsv)
         return DF(returned) if returned is not None else None, error
 
@@ -157,7 +215,11 @@ class DFMethod:
         self.func = func
 
     def __call__(
-        self, args: list[ast.expr], keywords: list[ast.keyword]
+        self,
+        args: list[ast.expr],
+        keywords: list[ast.keyword],
+        arg_indices: set[int] | None = None,
+        keyword_names: set[str] | None = None,
     ) -> DFMethodResult:
         """
         Returns a tuple with three elements:
@@ -165,6 +227,8 @@ class DFMethod:
         - The second element is the returned dataframe, if any.
         - The third element is an `IllegalAccess` instance representing an error if the method call is illegal, or `None` if there is no error.
         """
-        argsv, keywordsv = parse_args(args, keywords)
+        argsv, keywordsv = parse_args(
+            args, keywords, arg_indices=arg_indices, keyword_names=keyword_names
+        )
         updated, returned, error = self.func(self.df.columns.copy(), argsv, keywordsv)
         return DF(updated), DF(returned) if returned is not None else None, error
