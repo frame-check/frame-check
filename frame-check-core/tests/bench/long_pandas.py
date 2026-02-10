@@ -662,11 +662,13 @@ df = df.drop(["is_top_10_percent", "is_top_5_percent", "is_bottom_20_percent"], 
 
 # Phase 70: Segment-specific metrics
 df["segment_value"] = df.apply(
-    lambda x: x["customer_value_score"] * 1.5
-    if x["is_champion"]
-    else x["customer_value_score"] * 1.2
-    if x["is_big_spender"]
-    else x["customer_value_score"],
+    lambda x: (
+        x["customer_value_score"] * 1.5
+        if x["is_champion"]
+        else x["customer_value_score"] * 1.2
+        if x["is_big_spender"]
+        else x["customer_value_score"]
+    ),
     axis=1,
 ).round(2)
 
