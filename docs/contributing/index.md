@@ -129,8 +129,8 @@ This means:
 Tests are organized to mirror the source structure:
 
 ```
+conftest.py                    # Pytest configuration and fixtures (at root for --support to work)
 frame-check-core/tests/
-├── conftest.py              # Pytest configuration and fixtures
 ├── test_checker.py          # Core checker tests
 ├── config/                  # Tests for config module
 │   ├── test_config.py
@@ -167,6 +167,8 @@ Tests in `tests/features/` track API completeness and are organized by categorie
 - `test_column_assignment_methods.py` - CAM-* (column assignment)
 
 Use the `@pytest.mark.support(code="#DCMS-1")` marker to link tests to features.
+
+Run `pytest --support` from the project root to update `scripts/features.toml` with test results and regenerate the supported features table in `README.md`.
 
 ## Design Principles
 
