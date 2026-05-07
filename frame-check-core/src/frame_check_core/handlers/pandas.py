@@ -18,8 +18,13 @@ def pd_dataframe(args: list[Result], keywords: dict[str, Result]) -> PDFuncResul
             return None, None
 
 
+# Note: both read_csv and read_excel have the same usecols handling
+# hence we can re-use the same function
 @PD.register("read_csv")
-def pd_read_csv(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+@PD.register("read_excel")
+def pd_read_csv_and_excel(
+    args: list[Result], keywords: dict[str, Result]
+) -> PDFuncResult:
     usecols = idx_or_key(args, keywords, key="usecols")
     match usecols:
         case str():

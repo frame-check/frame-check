@@ -78,3 +78,37 @@ df = pd.read_csv("{CSV_TEST_FILE}", usecols=cols)
     assert tracker is not None
     assert tracker.id_ == "df"
     assert set(tracker.columns.keys()) == {"a", "b", "c"}
+
+
+# --- DCMS-9: From excel ---
+
+
+@pytest.mark.support(code="#DCMS-9")
+def test_dcms_9_read_excel_usecols():
+    """pd.read_excel('file.csv', usecols=["a","b","c"])"""
+    code = f"""
+import pandas as pd
+df = pd.read_excel("{CSV_TEST_FILE}", usecols=["a", "b", "c"])
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs.keys()) == {"df"}
+    tracker = fc.dfs.get("df")
+    assert tracker is not None
+    assert tracker.id_ == "df"
+    assert set(tracker.columns.keys()) == {"a", "b", "c"}
+
+
+@pytest.mark.support(code="#DCMS-9-1")
+def test_dcms_9_1_read_excel_usecols_indirect():
+    """pd.read_excel with usecols from variable"""
+    code = f"""
+import pandas as pd
+cols = ['a', 'b', 'c']
+df = pd.read_excel("{CSV_TEST_FILE}", usecols=cols)
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs.keys()) == {"df"}
+    tracker = fc.dfs.get("df")
+    assert tracker is not None
+    assert tracker.id_ == "df"
+    assert set(tracker.columns.keys()) == {"a", "b", "c"}
