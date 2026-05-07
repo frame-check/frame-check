@@ -4,15 +4,15 @@
 title = "Dictionary of Lists"
 code = """pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})"""
 description = "Creates a DataFrame from a dictionary where keys become column names and list values become the data for each column. This is fully supported in frame-check as the primary use case."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_2]
 title = "List of Dictionaries"
 code = """pd.DataFrame([{'col1': 1, 'col2': 3}, {'col1': 2, 'col2': 4}])"""
 description = "Creates a DataFrame where each dictionary represents a row, with keys as column names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_3]
 title = "Dictionary of Series"
@@ -161,7 +161,7 @@ title = "assign method"
 code = "df = df.assign(A=[1, 2, 3])"
 description = "Returns a new DataFrame with the column added or modified. Great for method chaining."
 tested = true
-supported = false
+supported = true
 
 [column_assignment_methods.cam_8]
 title = "Multiple assign"
@@ -175,7 +175,7 @@ title = "insert method"
 code = "df.insert(0, \"A\", [1, 2, 3])"
 description = "Inserts a column at a specific position in the DataFrame. Modifies in place."
 tested = true
-supported = true
+supported = false
 
 [column_assignment_methods.cam_10]
 title = "setitem with list"

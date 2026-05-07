@@ -14,6 +14,7 @@
 
 ```
 frame-check/
+├── conftest.py                # Pytest configuration (at root for --support to work)
 ├── frame-check-core/          # Core type checker package
 │   ├── src/frame_check_core/
 │   │   ├── checker.py         # Main AST visitor (entry point)
@@ -33,7 +34,7 @@ frame-check/
 │   │   ├── ast/               # AST utilities
 │   │   └── util/              # Utility functions
 │   └── tests/                 # Test suite
-│       ├── features/           # Feature/API completeness tests
+│       ├── features/           # Feature/API completeness tests (use @pytest.mark.support)
 │       ├── extractors/         # Extractor tests
 │       ├── config/             # Config tests
 │       ├── diagnostic/         # Diagnostic tests
@@ -193,6 +194,9 @@ uv run pytest frame-check-core/tests/features/
 
 # Run with markers
 uv run pytest -m "support"
+
+# Generate feature support docs (from root, updates scripts/features.toml and README.md)
+uv run pytest --support
 
 # Run benchmarks
 uv run pytest --codspeed
