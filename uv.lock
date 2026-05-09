@@ -435,7 +435,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "frame-check-core", editable = "frame-check-core" },
-    { name = "pygls", specifier = "==2.0.0a6" },
+    { name = "pygls", specifier = "==2.1.1" },
 ]
 
 [[package]]
@@ -1289,16 +1289,16 @@ wheels = [
 
 [[package]]
 name = "pygls"
-version = "2.0.0a6"
+version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "cattrs" },
     { name = "lsprotocol" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/42/270542357f5f52e0d7f4951d48b5a39efac6039810b5f9fb3ac9284e5cb8/pygls-2.0.0a6.tar.gz", hash = "sha256:1a94e0252e4bab607690e7dadbe949e1132a1e878325f5ad60c4936506188e49", size = 55930, upload-time = "2025-07-18T18:21:30.316Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/2e/7bbe061d175c0baddde8fc9edb908a4c31ba5d9165b8c68e3439c3a9f138/pygls-2.1.1.tar.gz", hash = "sha256:1da03ba9053201bb337dcdd8d121df70feb2a91e1a0dcc74de5da79755b1a201", size = 55091, upload-time = "2026-03-25T11:19:10.541Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/3b/8c83173e2afd7cb9b75201188c911b39f0b4dce09a3d0224dfc7f225290e/pygls-2.0.0a6-py3-none-any.whl", hash = "sha256:0a4a5f479a1554f8b493cfc4be5061344ae724f3959c51aedbf8c92174293233", size = 69574, upload-time = "2025-07-18T18:21:29.197Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/1a/208293b6c350f5abea6941d5606080d4a492644052504f5312e5de30a902/pygls-2.1.1-py3-none-any.whl", hash = "sha256:510a6dea2476177230c7d851125e5948efdf3fdb9ebfd8543fc434972f8faed4", size = 68975, upload-time = "2026-03-25T11:19:11.374Z" },
 ]
 
 [[package]]
