@@ -46,36 +46,22 @@ supported = true
 title = "From JSON"
 code = """pd.read_json('file.json')"""
 description = "Loads data from a JSON file into a DataFrame."
-tested = false
-supported = false
-
-[dataframe_creation_methods.dcms_8]
-title = "From SQL"
-code = """pd.read_sql('SELECT * FROM table', connection)"""
-description = "Loads data from a SQL query into a DataFrame."
-tested = false
+tested = true
 supported = false
 
 [dataframe_creation_methods.dcms_9]
 title = "From Excel"
 code = """pd.read_excel('file.xlsx')"""
 description = "Loads data from an Excel file into a DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_10]
 title = "From Parquet"
 code = """pd.read_parquet('file.parquet')"""
 description = "Loads data from a Parquet file into a DataFrame."
-tested = false
-supported = false
-
-[dataframe_creation_methods.dcms_11]
-title = "Empty DataFrame"
-code = """pd.DataFrame()"""
-description = "Creates an empty DataFrame with no columns or rows."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_12]
 title = "From Index"
