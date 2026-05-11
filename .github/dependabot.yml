@@ -10,3 +10,31 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      docs:
+        patterns:
+          - "mkdocs*"
+          - "pymdown*"
+          - "mkdocstrings*"
+          - "zensical"
+          - "mkdocs-gen-files"
+      dev-tools:
+        patterns:
+          - "pytest*"
+          - "mypy"
+          - "pre-commit"
+          - "ipython*"
+          - "ipykernel*"
+          - "pandas*"
+          - "tabulate"
+          - "tomlkit"
+          - "types-*"
+
+  - package-ecosystem: "uv"
+    directory: "/frame-check-lsp"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
