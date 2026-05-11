@@ -40,3 +40,24 @@ def pd_read_csv_and_excel(
             return cols, None
         case _:
             return None, None
+
+
+@PD.register("read_json")
+def pd_read_json(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.read_json() - cannot determine columns statically."""
+    # read_json doesn't have usecols parameter
+    # Columns depend on the JSON data which we can't know statically
+    return None, None
+
+
+@PD.register("read_parquet")
+def pd_read_parquet(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.read_parquet() - uses 'columns' parameter."""
+    columns = idx_or_key(args, keywords, key="columns")
+    match columns:
+        case list():
+            cols = {col for col in columns if isinstance(col, str)}
+            return cols, None
+        case _:
+            # No columns specified - all columns loaded but we don't know which
+            return None, None
