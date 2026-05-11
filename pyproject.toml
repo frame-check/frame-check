@@ -30,12 +30,12 @@ dev = [
     "pytest-codspeed>=4.4.0",
     "tabulate>=0.10.0",
     "tomlkit>=0.13.3",
-    "types-psutil>=7.2.2.20260408",
+    "types-psutil>=7.2.2.20260508",
 ]
 docs = [
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-material>=9.7.6",
-    "mkdocstrings[python]>=0.30.1",
+    "mkdocstrings[python]>=1.0.4",
     "pymdown-extensions>=10.21.2",
     "zensical>=0.0.36",
 ]
