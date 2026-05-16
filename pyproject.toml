@@ -22,8 +22,8 @@ frame-check-lsp = { workspace = true }
 dev = [
     "ipykernel>=7.2.0",
     "ipython>=9.13.0",
-    "mypy>=1.20.2",
-    "pandas>=3.0.2",
+    "mypy>=2.1.0",
+    "pandas>=3.0.3",
     "pandas-stubs>=3.0.0.260204",
     "pre-commit>=4.6.0",
     "pytest>=9.0.3",
@@ -36,8 +36,8 @@ docs = [
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
-    "pymdown-extensions>=10.21.2",
-    "zensical>=0.0.41",
+    "pymdown-extensions>=10.21.3",
+    "zensical>=0.0.42",
 ]
 
 [tool.pyright]
