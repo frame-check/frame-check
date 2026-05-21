@@ -9,7 +9,7 @@ class _Unknown:
 
 
 Unknown = _Unknown()  # A value that is either not supported or not provided.
-Result = Union[str, dict, list, "PD", "PDMethod", "DF", "DFMethod", _Unknown]
+Result = Union[str, bool, int, dict, list, "PD", "PDMethod", "DF", "DFMethod", _Unknown]
 
 _ASSIGNING_ATTR = "_frame_checker_assigning"
 _RESULT_ATTR = "_frame_checker_result_columns"
@@ -26,6 +26,13 @@ def set_assigning(node: ast.Subscript) -> None:
 def get_value(node: ast.AST, definitions: dict[str, Result]) -> Result:
     match node:
         case ast.Constant(value=str(result)):
+            return result
+
+        # bool must precede int — bool is a subclass of int
+        case ast.Constant(value=bool(result)):
+            return result
+
+        case ast.Constant(value=int(result)):
             return result
 
         case ast.List(elts=elts):
