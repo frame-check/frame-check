@@ -20,24 +20,24 @@ frame-check-lsp = { workspace = true }
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.2.0",
-    "ipython>=9.13.0",
-    "mypy>=2.1.0",
+    "ipykernel>=7.3.0",
+    "ipython>=9.15.0",
+    "mypy>=2.3.0",
     "pandas>=3.0.3",
-    "pandas-stubs>=3.0.0.260204",
+    "pandas-stubs>=3.0.3.260530",
     "pre-commit>=4.6.0",
-    "pytest>=9.0.3",
-    "pytest-codspeed>=5.0.2",
+    "pytest>=9.1.1",
+    "pytest-codspeed>=5.0.3",
     "tabulate>=0.10.0",
-    "tomlkit>=0.15.0",
+    "tomlkit>=0.15.1",
     "types-psutil>=7.2.2.20260508",
 ]
 docs = [
     "mkdocs-gen-files>=0.6.1",
-    "mkdocs-material>=9.7.6",
+    "mkdocs-material>=9.7.7",
     "mkdocstrings[python]>=1.0.4",
     "pymdown-extensions>=10.21.3",
-    "zensical>=0.0.42",
+    "zensical>=0.0.51",
 ]
 
 [tool.pyright]
