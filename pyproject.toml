@@ -36,7 +36,7 @@ docs = [
     "mkdocs-gen-files>=0.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
-    "pymdown-extensions>=10.21.3",
+    "pymdown-extensions>=11.0.1",
     "zensical>=0.0.42",
 ]
 
