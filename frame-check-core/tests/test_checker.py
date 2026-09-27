@@ -474,3 +474,16 @@ out = (
     region = checker.diagnostics[0].region
     assert (region.start.row, region.start.col) == (6, 5)
     assert (region.end.row, region.end.col) == (7, 22)
+
+
+def test_multi_column_right_hand_side_checks_every_column():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1], "B": [2]})
+df[["C", "D"]] = df[["A", "X"]]
+df[["E", "F"]] = df[["A", "B"]]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "column 'X' does not exist" in checker.diagnostics[0].message
+    assert checker.dfs["df"].columns["E"] == {"A", "B"}

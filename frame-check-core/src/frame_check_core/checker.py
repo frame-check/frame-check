@@ -906,8 +906,8 @@ class Checker(ast.NodeVisitor):
                 return self.generic_visit(node)
         read_refs = tracked_refs
 
-        # RHS refs are always single-column
-        read_cols = [r.col_names[0] for r in read_refs]
+        # Every column read on the right-hand side, e.g. both in df[["A", "B"]]
+        read_cols = [col for ref in read_refs for col in ref.col_names]
 
         # Try to add the first column with dependencies, report error if missing
         if missing := tracker.try_add(target_ref.col_names[0], depends_on=read_cols):
