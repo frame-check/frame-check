@@ -79,3 +79,50 @@ df["new"]
     assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "new", "other"}
     assert len(fc.diagnostics) == 1
     assert "Column 'Missing' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "sort_values('X')",
+        "sort_values(by=['A', 'X'])",
+        "drop_duplicates(subset=['X'])",
+        "drop_duplicates('X')",
+        "dropna(subset=['X'])",
+        "nlargest(3, 'X')",
+        "nsmallest(3, columns=['X'])",
+        "astype({'X': float})",
+    ],
+)
+def test_missing_column_argument_is_reported(call: str):
+    """These raise KeyError at runtime for unknown column labels."""
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{"A": [1], "B": [2]}})
+df2 = df.{call}
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert "column 'X' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "fillna({'X': 0})",
+        "replace({'X': {1: 2}})",
+        "round({'X': 1})",
+        "sort_values(0, axis=1)",
+        "sort_values(['A', 'B'])",
+        "astype(float)",
+    ],
+)
+def test_ignored_or_valid_column_argument_is_not_reported(call: str):
+    """Unknown labels are ignored by these calls, or the labels exist."""
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{"A": [1], "B": [2]}})
+df2 = df.{call}
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 0
