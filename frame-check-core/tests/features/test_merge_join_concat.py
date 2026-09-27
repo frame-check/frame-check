@@ -101,6 +101,7 @@ def test_cam_14_2_merge_with_missing_key_is_reported(expr: str, message: str):
         "L.merge(R, on=keys)",
         "L.merge(R, suffixes=sfx)",
         'L.merge(R, left_on="key", right_index=True)',
+        "L.merge(R, **opts)",
     ],
 )
 def test_cam_14_3_unresolvable_merge_stops_tracking(expr: str):
@@ -148,6 +149,7 @@ def test_cam_13_1_join_on_missing_column_is_reported():
         'L.join(R["b"])',  # Series: name unknown statically
         "L.join([R, R2])",  # overlapping frames in a list raise ValueError
         "L.join(other)",
+        "L.join(R[['b']], **opts)",
     ],
 )
 def test_cam_13_2_unresolvable_join_stops_tracking(expr: str):
@@ -183,6 +185,7 @@ def test_cam_12_concat_matches_pandas(expr: str):
         'pd.concat([L, R["b"]], axis=1)',  # Series
         "pd.concat({'l': L, 'r': R})",
         "pd.concat(frames)",
+        "pd.concat([L, R], **opts)",
     ],
 )
 def test_cam_12_1_unresolvable_concat_stops_tracking(expr: str):

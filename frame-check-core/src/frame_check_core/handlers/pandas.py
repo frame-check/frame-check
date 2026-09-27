@@ -1,5 +1,5 @@
 from .dataframe import MERGE_PARAMS, bind_positional, merge_columns
-from .models import DF, PD, PDFuncResult, Result, idx_or_key
+from .models import DF, PD, UNPACKED, PDFuncResult, Result, idx_or_key
 
 
 @PD.register("DataFrame")
@@ -82,6 +82,8 @@ def pd_merge(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
 def pd_concat(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
     """Handle pd.concat([df1, df2, ...]) for tracked frames."""
     objs = idx_or_key(args, keywords, idx=0, key="objs")
+    if UNPACKED in keywords:
+        return None, None
     if not (isinstance(objs, list) and objs and all(isinstance(o, DF) for o in objs)):
         # Series, dicts or unresolved frames: columns unknown
         return None, None

@@ -40,6 +40,9 @@ Result = Union[
 
 _ASSIGNING_ATTR = "_frame_checker_assigning"
 
+# Keyword set when a call unpacks a mapping we can't resolve (`f(**opts)`)
+UNPACKED = "**"
+
 # Resolves an argument expression to a tracked frame, if it is one
 FrameResolver = Callable[[ast.expr], "DF | None"]
 
@@ -139,11 +142,16 @@ def parse_args(
     frames: FrameResolver | None = None,
 ) -> tuple[list[Result], dict[str, Result]]:
     argsv = [get_result(arg, definitions, frames) for arg in args]
-    keywordsv = {
-        kw.arg: get_result(kw.value, definitions, frames)
-        for kw in keywords
-        if kw.arg is not None
-    }
+    keywordsv: dict[str, Result] = {}
+    for kw in keywords:
+        value = get_result(kw.value, definitions, frames)
+        if kw.arg is not None:
+            keywordsv[kw.arg] = value
+        elif isinstance(value, dict) and all(isinstance(k, str) for k in value):
+            # f(**{"a": 1}): a literal mapping unpacks to keywords
+            keywordsv.update(value)
+        else:
+            keywordsv[UNPACKED] = Unknown
     return argsv, keywordsv
 
 

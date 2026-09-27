@@ -1,5 +1,13 @@
 from ..diagnostic import IllegalAccess
-from .models import DF, ColumnLambda, DFFuncResult, Result, Unknown, idx_or_key
+from .models import (
+    DF,
+    UNPACKED,
+    ColumnLambda,
+    DFFuncResult,
+    Result,
+    Unknown,
+    idx_or_key,
+)
 
 
 def _column_labels(value: Result) -> set[str] | None:
@@ -17,6 +25,10 @@ def _column_labels(value: Result) -> set[str] | None:
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
+    if UNPACKED in keywords:
+        # assign(**mapping) with a mapping we can't resolve: columns unknown
+        return columns, None, None
+
     # Keywords are assigned in order; a callable sees the columns created by
     # the keywords before it, so validate lambda reads against that state.
     returned = set(columns)
@@ -263,7 +275,7 @@ def merge_columns(
         The merged columns (None when they can't be determined statically)
         and an error for missing keys, if any.
     """
-    if not isinstance(right, DF):
+    if not isinstance(right, DF) or UNPACKED in keywords:
         return None, None
     right_columns = right.columns
 
@@ -352,6 +364,8 @@ def df_join(
 ) -> DFFuncResult:
     other = idx_or_key(args, keywords, idx=0, key="other")
     params = bind_positional(args[1:], keywords, _JOIN_PARAMS)
+    if UNPACKED in params:
+        return columns, None, None
 
     # `on` names a column of the calling frame; unknown labels raise KeyError
     error = None
