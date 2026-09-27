@@ -328,3 +328,32 @@ df["a"]
     checker = Checker.check(code)
     assert set(checker.dfs["df"].columns) == {"a", "b"}
     assert len(checker.diagnostics) == 0
+
+
+# --- Rebinding tracked frames ---
+
+
+def test_rebinding_frame_to_unrelated_value_stops_tracking():
+    """df = load() replaces the schema we knew about; don't use the stale one."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = load()
+df["B"]
+"""
+    checker = Checker.check(code)
+    assert "df" not in checker.dfs
+    assert len(checker.diagnostics) == 0
+
+
+def test_rebinding_frame_to_derived_value_keeps_tracking():
+    """df = df[mask] keeps the columns, so the frame is still checked."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df[df["A"] > 0]
+df["B"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A"}
+    assert len(checker.diagnostics) == 1

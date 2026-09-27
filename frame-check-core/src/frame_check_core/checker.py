@@ -71,6 +71,13 @@ def format_diagnostic(
 _generic_visit = ast.NodeVisitor.generic_visit
 
 
+def _references_name(node: ast.AST, name: str) -> bool:
+    """Check whether `name` is used anywhere inside `node`."""
+    return any(
+        isinstance(child, ast.Name) and child.id == name for child in ast.walk(node)
+    )
+
+
 class Checker(ast.NodeVisitor):
     """
     AST visitor that validates DataFrame column operations.
@@ -368,6 +375,11 @@ class Checker(ast.NodeVisitor):
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             var_name = node.targets[0].id
             self.definitions[var_name] = get_result(node.value, self.definitions)
+            # Rebinding a tracked frame to an unrelated value (df = load())
+            # makes its schema stale. Values derived from the frame itself
+            # (df = df[mask], df = df.sort_values(...)) keep being tracked.
+            if var_name in self.dfs and not _references_name(node.value, var_name):
+                del self.dfs[var_name]
 
         # Handle column assignments: df['col'] = expr or df[['a', 'b']] = expr
         if len(node.targets) != 1:
