@@ -512,12 +512,15 @@ class Checker(ast.NodeVisitor):
                 return module_name in self.pandas_aliases
         return False
 
-    def _call_pandas(self, call: ast.Call, function_name: str) -> set[str] | None:
+    def _call_pandas(
+        self, call: ast.Call, label: str, function_name: str
+    ) -> set[str] | None:
         """
         Run the registered handler for a pandas function call.
 
         Args:
             call: The call AST node, e.g. for `pd.read_csv(...)`.
+            label: How the call is referred to in diagnostics (e.g. 'pd.merge').
             function_name: The pandas function being called.
 
         Returns:
@@ -527,9 +530,20 @@ class Checker(ast.NodeVisitor):
         if function is None:
             return None
         self._evaluated_calls.add(id(call))
-        created_df, _error = function(
+        created_df, error = function(
             call.args, call.keywords, self.definitions, self._frame_arg
         )
+        if error is not None and error.frame is not None:
+            self._report(
+                error.frame,
+                diagnostic.missing_columns(
+                    action=f"{label}()",
+                    missing_cols=error.missing,
+                    node=call,
+                    df_name=error.frame,
+                    available_cols=error.available or [],
+                ),
+            )
         return None if created_df is None else created_df.columns
 
     def _call_method(
@@ -565,8 +579,12 @@ class Checker(ast.NodeVisitor):
                     action=f"{label}.{method_name}()",
                     missing_cols=error.missing,
                     node=call,
-                    df_name=label,
-                    available_cols=list(method.df.columns),
+                    df_name=error.frame or label,
+                    available_cols=(
+                        error.available
+                        if error.available is not None
+                        else list(method.df.columns)
+                    ),
                 ),
             )
         return method.df, updated_df, returned_df
@@ -611,7 +629,9 @@ class Checker(ast.NodeVisitor):
                 func=ast.Attribute(value=ast.Name(id=module_name), attr=function_name)
             ) if module_name in self.pandas_aliases:
                 # pd.DataFrame({...}), pd.read_csv(..., usecols=[...])
-                columns = self._call_pandas(expr, function_name)
+                columns = self._call_pandas(
+                    expr, f"{module_name}.{function_name}", function_name
+                )
                 if columns is None:
                     return None
                 return f"{module_name}.{function_name}(...)", columns

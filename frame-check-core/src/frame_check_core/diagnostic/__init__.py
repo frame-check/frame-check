@@ -34,9 +34,14 @@ from .region import CodeRegion
 
 @dataclass(frozen=True, slots=True)
 class IllegalAccess:
-    """A method call that references columns missing from its DataFrame."""
+    """A call that references columns missing from a DataFrame."""
 
     missing: list[str]
+    # Label of the frame the columns are missing from, when it isn't the
+    # frame the method is called on (e.g. the right side of a merge)
+    frame: str | None = None
+    # Columns of that frame, for the "available columns" hint
+    available: list[str] | None = None
 
 
 class Severity(StrEnum):

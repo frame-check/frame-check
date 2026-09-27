@@ -1,3 +1,4 @@
+from .dataframe import MERGE_PARAMS, bind_positional, merge_columns
 from .models import DF, PD, PDFuncResult, Result, idx_or_key
 
 
@@ -64,3 +65,14 @@ def pd_read_parquet(args: list[Result], keywords: dict[str, Result]) -> PDFuncRe
         case _:
             # No columns specified - all columns loaded but we don't know which
             return None, None
+
+
+@PD.register("merge")
+def pd_merge(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.merge(left, right, ...) like left.merge(right, ...)."""
+    left = idx_or_key(args, keywords, idx=0, key="left")
+    if not isinstance(left, DF):
+        return None, None
+    right = idx_or_key(args, keywords, idx=1, key="right")
+    params = bind_positional(args[2:], keywords, MERGE_PARAMS)
+    return merge_columns(left.columns, left.label, right, params)

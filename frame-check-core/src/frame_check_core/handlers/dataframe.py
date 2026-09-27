@@ -208,3 +208,133 @@ def df_astype(
         return _same_columns(columns, args, keywords)
     required = [k for k in dtype if isinstance(k, str)]
     return _same_columns(columns, args, keywords, required=required)
+
+
+_DEFAULT_SUFFIXES = ("_x", "_y")
+
+# Positional parameters after `right` in DataFrame.merge / pd.merge
+MERGE_PARAMS = (
+    "how",
+    "on",
+    "left_on",
+    "right_on",
+    "left_index",
+    "right_index",
+    "sort",
+    "suffixes",
+    "copy",
+    "indicator",
+)
+
+
+def bind_positional(
+    args: list[Result], keywords: dict[str, Result], names: tuple[str, ...]
+) -> dict[str, Result]:
+    """Merge positional `args` into `keywords` using the parameter `names`."""
+    bound = dict(zip(names, args, strict=False))
+    bound.update(keywords)
+    return bound
+
+
+def merge_columns(
+    left: set[str],
+    left_label: str | None,
+    right: Result,
+    keywords: dict[str, Result],
+) -> tuple[set[str] | None, IllegalAccess | None]:
+    """
+    Compute the columns of `left.merge(right, ...)` (and `pd.merge`).
+
+    Join keys appear once; other columns present on both sides get the
+    `suffixes` (default `_x`/`_y`, `None` = unchanged). Keys missing from
+    either side raise KeyError, so they are returned as an error.
+
+    Args:
+        left: Columns of the left frame.
+        left_label: Label of the left frame for diagnostics, or None when it
+            is the frame the method is called on.
+        right: The right frame argument.
+        keywords: The remaining arguments by name (see `bind_positional`).
+
+    Returns:
+        The merged columns (None when they can't be determined statically)
+        and an error for missing keys, if any.
+    """
+    if not isinstance(right, DF):
+        return None, None
+    right_columns = right.columns
+
+    left_index = keywords.get("left_index") is True
+    right_index = keywords.get("right_index") is True
+    missing_left: set[str] = set()
+    missing_right: set[str] = set()
+
+    if left_index != right_index:
+        # One-sided index merges have irregular output columns
+        return None, None
+    if keywords.get("how") == "cross" or left_index:
+        shared: set[str] = set()
+    elif keywords.get("on") is not None:
+        on = _column_labels(keywords["on"])
+        if on is None:
+            return None, None
+        missing_left, missing_right = on - left, on - right_columns
+        shared = on
+    elif keywords.get("left_on") is not None or keywords.get("right_on") is not None:
+        left_on = _column_labels(keywords.get("left_on") or [])
+        right_on = _column_labels(keywords.get("right_on") or [])
+        if left_on is None or right_on is None:
+            return None, None
+        missing_left, missing_right = left_on - left, right_on - right_columns
+        shared = left_on & right_on
+    else:
+        # Default: join on the columns both frames have
+        shared = left & right_columns
+        if not shared:
+            return None, None
+
+    error = None
+    if missing_left:
+        error = IllegalAccess(
+            missing=sorted(missing_left),
+            frame=left_label,
+            available=sorted(left) if left_label is not None else None,
+        )
+    elif missing_right:
+        error = IllegalAccess(
+            missing=sorted(missing_right),
+            frame=right.label,
+            available=sorted(right_columns),
+        )
+
+    suffixes = keywords.get("suffixes", list(_DEFAULT_SUFFIXES))
+    if not (
+        isinstance(suffixes, list)
+        and len(suffixes) == 2
+        and all(s is None or isinstance(s, str) for s in suffixes)
+    ):
+        return None, error
+    left_suffix, right_suffix = suffixes
+
+    overlap = (left & right_columns) - shared
+    merged = (left - overlap) | (right_columns - overlap)
+    for column in overlap:
+        merged.add(column + left_suffix if left_suffix else column)
+        merged.add(column + right_suffix if right_suffix else column)
+
+    indicator = keywords.get("indicator")
+    if indicator is True:
+        merged.add("_merge")
+    elif isinstance(indicator, str):
+        merged.add(indicator)
+    return merged, error
+
+
+@DF.register("merge")
+def df_merge(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    right = idx_or_key(args, keywords, idx=0, key="right")
+    params = bind_positional(args[1:], keywords, MERGE_PARAMS)
+    merged, error = merge_columns(columns, None, right, params)
+    return columns, merged, error

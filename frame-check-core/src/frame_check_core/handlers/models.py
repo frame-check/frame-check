@@ -35,6 +35,7 @@ Result = Union[
     "DF",
     "DFMethod",
     _Unknown,
+    None,
 ]
 
 _ASSIGNING_ATTR = "_frame_checker_assigning"
@@ -68,6 +69,9 @@ def get_value(
         case ast.Constant(value=str(result)):
             return result
 
+        case ast.Constant(value=None):
+            return None
+
         # bool must precede int — bool is a subclass of int
         case ast.Constant(value=bool(result)):
             return result
@@ -75,7 +79,7 @@ def get_value(
         case ast.Constant(value=int(result)):
             return result
 
-        case ast.List(elts=elts):
+        case ast.List(elts=elts) | ast.Tuple(elts=elts):
             elements = []
             for elt in elts:
                 parsed_elt = get_value(elt, definitions, frames)
