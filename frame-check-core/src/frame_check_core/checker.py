@@ -410,6 +410,28 @@ class Checker(ast.NodeVisitor):
         self._skip_subscripts.update(id(r.node) for r in read_refs)
         self.generic_visit(node)
 
+    def visit_Delete(self, node: ast.Delete) -> None:
+        """
+        Handle column removal via the `del` statement.
+
+        Handles `del df['col']` and `del df['a'], df['b']`, removing the
+        columns from the tracked DataFrame.
+
+        Args:
+            node: The delete statement AST node.
+        """
+        for target in node.targets:
+            ref = extract_single_column_ref(target)
+            if ref is None:
+                continue
+            tracker = self.dfs.get(ref.df_name)
+            if tracker is None:
+                continue
+            tracker.set_columns(tracker.columns.keys() - ref.col_names)
+            # Not a read: don't validate the deleted column afterwards
+            self._skip_subscripts.add(id(ref.node))
+        self.generic_visit(node)
+
     def visit_Subscript(self, node: ast.Subscript) -> None:
         """
         Validate a column read operation.

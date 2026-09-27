@@ -3,6 +3,53 @@
 import pytest
 from frame_check_core.checker import Checker
 
+# --- CRM-1: del statement ---
+
+
+@pytest.mark.support(code="#CRM-1")
+def test_crm_1_del_statement():
+    """del df['A']"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+del df['A']
+df['B']
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"B"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CRM-1-1")
+def test_crm_1_1_del_then_read_deleted_column():
+    """Reading a deleted column is reported."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+del df['A']
+df['A']
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert "'A' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CRM-1-2")
+def test_crm_1_2_del_multiple_targets():
+    """del df['A'], df['B']"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+del df['A'], df['B']
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"C"}
+
+
 # --- CRM-2: drop method ---
 
 
