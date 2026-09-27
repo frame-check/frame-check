@@ -225,6 +225,8 @@ class Checker(ast.NodeVisitor):
         # _eval_frame results by node id, so each expression's diagnostics
         # are reported once however many code paths evaluate it
         self._frames: dict[int, tuple[str, set[str]] | None] = {}
+        # Method calls already run through a handler (see visit_Call)
+        self._evaluated_calls: set[int] = set()
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
@@ -517,6 +519,7 @@ class Checker(ast.NodeVisitor):
         method = DF(columns).get_method(method_name)
         if method is None:
             return None
+        self._evaluated_calls.add(id(call))
 
         updated_df, returned_df, error = method(
             call.args, call.keywords, self.definitions
@@ -703,6 +706,25 @@ class Checker(ast.NodeVisitor):
             # None); stop tracking it so it can't produce false positives.
             self.dfs.pop(target, None)
         return True
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """
+        Check DataFrame method calls in any expression position.
+
+        Calls not already handled as a statement or assignment, such as
+        `return df.drop(columns="X")` or `print(df.sort_values("X"))`, are
+        evaluated so errors in their arguments are reported. Their in-place
+        effects are not applied, which keeps the frame a superset.
+
+        Args:
+            node: The call AST node.
+        """
+        if (
+            isinstance(node.func, ast.Attribute)
+            and id(node) not in self._evaluated_calls
+        ):
+            self._eval_frame(node)
+        self.generic_visit(node)
 
     def visit_Expr(self, node: ast.Expr) -> None:
         """

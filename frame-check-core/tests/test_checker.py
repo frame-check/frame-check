@@ -390,3 +390,38 @@ unknown_df["column"] = df["A"]
     checker = Checker.check(code)
     assert len(checker.diagnostics) == 1
     assert "not declared" in checker.diagnostics[0].message
+
+
+# --- Method calls in expression positions ---
+
+
+def test_method_call_in_expression_is_checked():
+    """Calls used as arguments or return values are checked too."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+print(df.sort_values("X"))
+def f():
+    local = pd.DataFrame({"A": [1]})
+    return local.drop(columns="Y")
+"""
+    checker = Checker.check(code)
+    messages = [d.message.splitlines()[0] for d in checker.diagnostics]
+    assert messages == [
+        "df.sort_values(): column 'X' does not exist on DataFrame 'df'.",
+        "local.drop(): column 'Y' does not exist on DataFrame 'local'.",
+    ]
+
+
+def test_method_call_errors_are_reported_once():
+    """Calls handled as statements or assignments aren't evaluated again."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df2 = df.drop(columns="X")
+df.drop(columns="X", inplace=True)
+df3 = df.assign(B=1).drop(columns="X")
+total = df.drop(columns="X")["A"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 4
