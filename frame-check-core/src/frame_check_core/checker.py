@@ -551,6 +551,33 @@ class Checker(ast.NodeVisitor):
             self._skip_subscripts.add(id(ref.node))
         self.generic_visit(node)
 
+    def _check_chained_read(self, node: ast.Subscript) -> None:
+        """
+        Validate a single-column read on a method chain, e.g. `df.assign(A=1)["A"]`.
+
+        Args:
+            node: The subscript AST node whose value is a call.
+        """
+        match node.slice:
+            case ast.Constant(value=str(col_name)):
+                pass
+            case _:
+                return
+
+        frame = self._eval_frame(node.value)
+        if frame is None:
+            return
+        label, columns = frame
+        if col_name not in columns:
+            self.diagnostics.append(
+                diagnostic.wrong_read(
+                    col_name=col_name,
+                    node=node,
+                    df_name=label,
+                    available_cols=list(columns),
+                )
+            )
+
     def visit_Subscript(self, node: ast.Subscript) -> None:
         """
         Validate a column read operation.
@@ -571,6 +598,11 @@ class Checker(ast.NodeVisitor):
         """
         # Skip if already handled in visit_Assign
         if id(node) in self._skip_subscripts:
+            return self.generic_visit(node)
+
+        # Chained read: df.assign(A=1)["A"]
+        if isinstance(node.value, ast.Call):
+            self._check_chained_read(node)
             return self.generic_visit(node)
 
         ref = extract_single_column_ref(node)

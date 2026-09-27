@@ -42,19 +42,36 @@ df["A"]
 
 
 @pytest.mark.support(code="#CAM-7-1")
-@pytest.mark.xfail(reason="Not implemented", strict=True)
 def test_cam_7_1_assign_subscript():
     """df.assign(A=[1, 2, 3])["A"] - chained subscript access"""
     code = """
 import pandas as pd
 df = pd.DataFrame({})
 df.assign(A=[1, 2, 3])["A"]
+df.assign(A=[1, 2, 3])["B"]
 """
     fc = Checker.check(code)
     df = fc.dfs.get("df")
     assert df is not None
-    assert set(df.columns.keys()) == {"A"}
-    assert len(fc.diagnostics) == 0
+    # assign returns a new frame; df itself is unchanged
+    assert set(df.columns.keys()) == set()
+    assert len(fc.diagnostics) == 1
+    assert "Column 'B' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CAM-7-1-1")
+def test_cam_7_1_1_chained_read_of_missing_column():
+    """df.drop(columns="A")["A"] is reported against the chained frame."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1], "B": [2]})
+total = df.drop(columns="A")["A"].sum()
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "Column 'A' does not exist on DataFrame 'df.drop(...)'."
+    )
 
 
 @pytest.mark.support(code="#CAM-7-2")
