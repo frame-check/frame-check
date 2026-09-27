@@ -245,65 +245,75 @@ class Checker(ast.NodeVisitor):
 
         return False
 
-    def _try_dataframe_method(self, node: ast.Assign) -> bool:
+    def _try_dataframe_method(self, call: ast.expr, target: str | None) -> bool:
         """
         Attempt to detect and handle DataFrame method calls.
 
         Handles patterns like:
-        - `df = df.assign(new_col=values)`
-        - `df.insert(1, "new_col", values)`
+        - `df = df.assign(new_col=values)` (returns a new DataFrame)
+        - `df.insert(1, "new_col", values)` (modifies `df` in place)
+        - `s = df.pop("col")` (modifies `df` in place, returns a Series)
+
+        In-place changes are applied to the source DataFrame's tracker, while
+        a returned DataFrame is bound to `target`.
 
         Args:
-            node: The assignment AST node to analyze.
+            call: The expression that may be a DataFrame method call.
+            target: Name the call result is assigned to, or None for a
+                standalone expression statement.
 
         Returns:
             True if a DataFrame method was handled, False otherwise.
         """
-        if len(node.targets) != 1:
-            return False
-
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            return False
-
-        result_name = target.id
-
-        # Match: df = df.register(...) or df2 = df.register(...)
-        match node.value:
+        # Match: df.method(...)
+        match call:
             case ast.Call(
                 func=ast.Attribute(value=ast.Name(id=source_df_name), attr=method_name),
                 args=args,
                 keywords=keywords,
             ):
-                # Check if source is a known DataFrame
-                if source_df_name not in self.dfs:
-                    return False
+                pass
+            case _:
+                return False
 
-                tracker = self.dfs[source_df_name]
-                current_columns = set(tracker.columns.keys())
+        tracker = self.dfs.get(source_df_name)
+        if tracker is None:
+            return False
 
-                # Create a temporary DF to use the method registry
-                temp_df = DF(current_columns)
-                method = temp_df.get_method(method_name)
-                if method is None:
-                    return False
+        method = DF(tracker.columns).get_method(method_name)
+        if method is None:
+            return False
 
-                # Call the handler
-                updated_df, returned_df, _error = method(
-                    args, keywords, self.definitions
-                )
+        updated_df, returned_df, _error = method(args, keywords, self.definitions)
 
-                # If method returns a new DataFrame (like assign), use returned
-                # Otherwise use updated (for in-place modifications)
-                result_df = returned_df if returned_df is not None else updated_df
+        if updated_df.columns != method.df.columns:
+            tracker.set_columns(updated_df.columns)
 
-                # Update or create the result tracker
-                self.dfs[result_name] = Tracker.new_with_columns(
-                    result_name, columns=list(result_df.columns)
-                )
-                return True
+        if target is None:
+            return True
 
-        return False
+        if returned_df is not None:
+            self.dfs[target] = Tracker.new_with_columns(
+                target, columns=list(returned_df.columns)
+            )
+        else:
+            # The target now holds a non-DataFrame result (e.g. a Series or
+            # None); stop tracking it so it can't produce false positives.
+            self.dfs.pop(target, None)
+        return True
+
+    def visit_Expr(self, node: ast.Expr) -> None:
+        """
+        Handle standalone expression statements.
+
+        Applies in-place DataFrame method calls such as
+        `df.insert(0, "A", values)` or `df.rename(columns=..., inplace=True)`.
+
+        Args:
+            node: The expression statement AST node.
+        """
+        self._try_dataframe_method(node.value, target=None)
+        self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """
@@ -330,7 +340,11 @@ class Checker(ast.NodeVisitor):
             return
 
         # Try DataFrame method calls
-        if self._try_dataframe_method(node):
+        if (
+            len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and self._try_dataframe_method(node.value, target=node.targets[0].id)
+        ):
             self.generic_visit(node)
             return
 

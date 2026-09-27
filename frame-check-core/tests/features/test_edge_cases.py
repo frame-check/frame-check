@@ -24,7 +24,6 @@ df['colb']
 
 
 @pytest.mark.support(code="#EC-2-1")
-@pytest.mark.xfail(reason="Standalone method calls not implemented", strict=True)
 def test_ec_2_1_rename_inplace():
     """df.rename(columns=..., inplace=True)"""
     code = """

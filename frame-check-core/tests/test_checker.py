@@ -220,3 +220,46 @@ df = pd.read_csv("{CSV_TEST_FILE}", usecols=[a, 'b', 'c'])
     assert tracker is not None
     assert tracker.id_ == "df"
     assert set(tracker.columns.keys()) == {"a", "b", "c"}
+
+
+# --- DataFrame method call semantics ---
+
+
+def test_inplace_method_mutates_source_not_target():
+    """`x = df.insert(...)` mutates df; x is None at runtime, not a DataFrame."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+x = df.insert(0, 'B', [2])
+df['B']
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "B"}
+    assert "x" not in checker.dfs
+    assert len(checker.diagnostics) == 0
+
+
+def test_returned_dataframe_leaves_source_untouched():
+    """`df2 = df.assign(...)` binds the new frame to df2 only."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df2 = df.assign(B=[2])
+df['B']
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A"}
+    assert set(checker.dfs["df2"].columns) == {"A", "B"}
+    assert len(checker.diagnostics) == 1
+
+
+def test_inplace_method_keeps_column_dependencies():
+    """In-place updates preserve dependencies recorded for surviving columns."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df['C'] = df['A']
+df.insert(0, 'B', [2])
+"""
+    checker = Checker.check(code)
+    assert checker.dfs["df"].columns["C"] == {"A"}
