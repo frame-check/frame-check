@@ -52,9 +52,6 @@ jobs:
       - name: mypy check
         run: uv run mypy . --check-untyped-defs --exclude scripts
 
-      - name: Install ruff
-        run: uv pip install ruff
-
       - name: Ruff Check
         run: uv run ruff check --output-format=github .
 

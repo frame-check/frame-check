@@ -28,6 +28,7 @@ dev = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-codspeed>=5.0.3",
+    "ruff>=0.16.9",
     "tabulate>=0.10.0",
     "tomlkit>=0.15.1",
     "types-psutil>=7.2.2.20260906",
