@@ -81,8 +81,8 @@ supported = false
 title = "Copy Constructor"
 code = """pd.DataFrame(other_df)"""
 description = "Creates a DataFrame as a copy of another DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_15]
 title = "From Records"
@@ -181,22 +181,22 @@ supported = false
 title = "concat"
 code = """df = pd.concat([df, new_df], axis=1)"""
 description = "Combines columns from two DataFrames through horizontal concatenation."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_13]
 title = "join"
 code = """df = df.join(other_df)"""
 description = "Adds columns from another DataFrame based on index alignment."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_14]
 title = "merge"
 code = """df = df.merge(df2, on='key')"""
 description = "Adds columns through merging DataFrames on common columns or indices."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_15]
 title = "From eval"

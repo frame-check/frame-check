@@ -134,6 +134,7 @@ Each component should then have a README.md file with instructions on how to run
 | <a id="DCMS-7"></a>DCMS-7   | From Json            | pd.read_json('file.json')                                      | Loads data from a JSON file into a DataFrame.                                                                                                                                         | ✅          |
 | <a id="DCMS-9"></a>DCMS-9   | From Excel           | pd.read_excel('file.xlsx')                                     | Loads data from an Excel file into a DataFrame.                                                                                                                                       | ✅          |
 | <a id="DCMS-10"></a>DCMS-10 | From Parquet         | pd.read_parquet('file.parquet')                                | Loads data from a Parquet file into a DataFrame.                                                                                                                                      | ✅          |
+| <a id="DCMS-14"></a>DCMS-14 | Copy Constructor     | pd.DataFrame(other_df)                                         | Creates a DataFrame as a copy of another DataFrame.                                                                                                                                   | ✅          |
 
 ### column_assignment_methods
 
@@ -144,6 +145,9 @@ Each component should then have a README.md file with instructions on how to run
 | <a id="CAM-8"></a>CAM-8   | Multiple Assign    | df = df.assign(B=1, C=2)                   | Creates multiple columns at once using keyword arguments.                                                   | ✅          |
 | <a id="CAM-9"></a>CAM-9   | Insert Method      | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                | ✅          |
 | <a id="CAM-10"></a>CAM-10 | Setitem With List  | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]] | Assigns multiple columns at once, either from other columns or external values.                             | ✅          |
+| <a id="CAM-12"></a>CAM-12 | Concat             | df = pd.concat([df, new_df], axis=1)       | Combines columns from two DataFrames through horizontal concatenation.                                      | ✅          |
+| <a id="CAM-13"></a>CAM-13 | Join               | df = df.join(other_df)                     | Adds columns from another DataFrame based on index alignment.                                               | ✅          |
+| <a id="CAM-14"></a>CAM-14 | Merge              | df = df.merge(df2, on='key')               | Adds columns through merging DataFrames on common columns or indices.                                       | ✅          |
 | <a id="CAM-16"></a>CAM-16 | From Query Results | df['new'] = df.query('A > 0')['B']         | Assigns values from a filtered subset of another column.                                                    | ✅          |
 
 ### column_removal_methods
