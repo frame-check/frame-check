@@ -79,7 +79,6 @@ df["B"]
 
 
 @pytest.mark.support(code="#CAM-9")
-@pytest.mark.xfail(reason="Standalone method calls not implemented", strict=True)
 def test_cam_9_insert_method():
     """df.insert(0, "A", [1, 2, 3])"""
     code = """

@@ -32,8 +32,11 @@ from frame_check_core.util.col_similarity import zero_deps_jaro_winkler
 from .region import CodeRegion
 
 
+@dataclass(frozen=True, slots=True)
 class IllegalAccess:
-    pass
+    """A method call that references columns missing from its DataFrame."""
+
+    missing: list[str]
 
 
 class Severity(StrEnum):
@@ -245,4 +248,62 @@ def wrong_read(
         severity=Severity.ERROR,
         region=CodeRegion.from_ast_node(node=node),
         name_suggestion=similar,
+    )
+
+
+def missing_columns(
+    action: str,
+    missing_cols: list[str],
+    node: ast.expr,
+    df_name: str,
+    available_cols: list[str],
+) -> Diagnostic:
+    """
+    Create a diagnostic for an operation on non-existent columns.
+
+    Called when an operation that raises `KeyError` for unknown labels, such
+    as `df.drop(columns=['X'])`, `df.pop('X')` or `del df['X']`, targets
+    columns that don't exist on the DataFrame.
+
+    Args:
+        action: Short description of the operation (e.g., 'df.drop()').
+        missing_cols: Column names that don't exist but are referenced.
+        node: The AST node of the operation (for location info).
+        df_name: The name of the DataFrame variable (e.g., 'df').
+        available_cols: List of columns that actually exist on the DataFrame.
+
+    Returns:
+        A Diagnostic with the error message, suggestions for similar column
+        names (if any) and the list of available columns.
+
+    Example:
+        For `df.drop(columns=['Nmae'])` where 'Name' exists, produces:
+        "df.drop(): column 'Nmae' does not exist on DataFrame 'df'."
+    """
+    if len(missing_cols) == 1:
+        subject = f"column '{missing_cols[0]}' does not exist"
+    else:
+        formatted = ", ".join(f"'{col}'" for col in missing_cols)
+        subject = f"columns {formatted} do not exist"
+    lines: list[str] = [f"{action}: {subject} on DataFrame '{df_name}'."]
+
+    suggestions: list[str] = []
+    first_suggestion: str | None = None
+    for col in missing_cols:
+        if similar := zero_deps_jaro_winkler(col, available_cols):
+            suggestions.append(f"'{col}' -> '{similar}'")
+            if first_suggestion is None:
+                first_suggestion = similar
+
+    if suggestions:
+        lines.append(f"  Did you mean: {', '.join(suggestions)}?")
+
+    if available_cols:
+        lines.append(f"  Available columns: {_format_columns(available_cols)}")
+
+    return Diagnostic(
+        message="\n".join(lines),
+        severity=Severity.ERROR,
+        region=CodeRegion.from_ast_node(node=node),
+        name_suggestion=first_suggestion,
     )

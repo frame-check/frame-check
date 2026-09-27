@@ -220,3 +220,140 @@ df = pd.read_csv("{CSV_TEST_FILE}", usecols=[a, 'b', 'c'])
     assert tracker is not None
     assert tracker.id_ == "df"
     assert set(tracker.columns.keys()) == {"a", "b", "c"}
+
+
+# --- DataFrame method call semantics ---
+
+
+def test_inplace_method_mutates_source_not_target():
+    """`x = df.insert(...)` mutates df; x is None at runtime, not a DataFrame."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+x = df.insert(0, 'B', [2])
+df['B']
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "B"}
+    assert "x" not in checker.dfs
+    assert len(checker.diagnostics) == 0
+
+
+def test_returned_dataframe_leaves_source_untouched():
+    """`df2 = df.assign(...)` binds the new frame to df2 only."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df2 = df.assign(B=[2])
+df['B']
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A"}
+    assert set(checker.dfs["df2"].columns) == {"A", "B"}
+    assert len(checker.diagnostics) == 1
+
+
+def test_inplace_method_keeps_column_dependencies():
+    """In-place updates preserve dependencies recorded for surviving columns."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df['C'] = df['A']
+df.insert(0, 'B', [2])
+"""
+    checker = Checker.check(code)
+    assert checker.dfs["df"].columns["C"] == {"A"}
+
+
+def test_self_assigned_method_keeps_column_dependencies():
+    """`df = df.method(...)` updates the tracker in place, keeping dependencies."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df['C'] = df['A']
+df = df.assign(B=[2])
+"""
+    checker = Checker.check(code)
+    assert checker.dfs["df"].columns["C"] == {"A"}
+
+
+# --- Untracked variables (#135) ---
+
+
+def test_assign_to_frame_without_schema_is_not_reported():
+    """A frame read without usecols has no schema; assignments aren't flagged."""
+    code = """
+import pandas as pd
+df = pd.read_csv("file.csv")
+df["a"]
+df["a"] = df["b"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 0
+
+
+def test_assign_to_dict_is_not_reported():
+    """Subscript assignment on a non-DataFrame variable isn't flagged."""
+    code = """
+config = {}
+config["x"] = 1
+config["y"] = config["x"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 0
+
+
+def test_assign_from_untracked_variable_keeps_target_column():
+    """df['C'] = d['x'] still adds 'C' when d is not a tracked DataFrame."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+d = {"x": 1}
+df["C"] = d["x"]
+df["C"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "C"}
+    assert len(checker.diagnostics) == 0
+
+
+def test_frame_init_dict_with_variable_key():
+    """Dict keys that are variables resolve to their values (#37)."""
+    code = """
+import pandas as pd
+col1 = "a"
+df = pd.DataFrame({col1: [1, 2, 3], "b": [4, 5, 6]})
+df["a"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a", "b"}
+    assert len(checker.diagnostics) == 0
+
+
+# --- Rebinding tracked frames ---
+
+
+def test_rebinding_frame_to_unrelated_value_stops_tracking():
+    """df = load() replaces the schema we knew about; don't use the stale one."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = load()
+df["B"]
+"""
+    checker = Checker.check(code)
+    assert "df" not in checker.dfs
+    assert len(checker.diagnostics) == 0
+
+
+def test_rebinding_frame_to_derived_value_keeps_tracking():
+    """df = df[mask] keeps the columns, so the frame is still checked."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df[df["A"] > 0]
+df["B"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A"}
+    assert len(checker.diagnostics) == 1

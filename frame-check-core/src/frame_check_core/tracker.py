@@ -135,6 +135,22 @@ class Tracker[M: Strict | Relaxed]:
         columns[column].update(dependencies)
         return None
 
+    def set_columns(self, columns: set[str]) -> None:
+        """
+        Replace the tracked columns in place (e.g. after `df.drop(..., inplace=True)`).
+
+        Columns that remain keep their recorded dependencies; removed columns
+        are dropped and new columns are added without dependencies.
+
+        Args:
+            columns: The complete set of columns the DataFrame now has.
+        """
+        current = self.columns
+        for column in current.keys() - columns:
+            del current[column]
+        for column in columns - current.keys():
+            current[column] = set()
+
     @classmethod
     def new_with_columns(cls, id_: str, columns: list[str]) -> "Tracker[Strict]":
         """

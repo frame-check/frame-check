@@ -126,11 +126,14 @@ Each component should then have a README.md file with instructions on how to run
 
 ### dataframe_creation_methods
 
-| id                        | title                | code                                                           | description                                                                                                                                                                           | supported   |
-|:--------------------------|:---------------------|:---------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------|
-| <a id="DCMS-1"></a>DCMS-1 | Dictionary Of Lists  | pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})                 | Creates a DataFrame from a dictionary where keys become column names and list values become the data for each column. This is fully supported in frame-check as the primary use case. | ✅          |
-| <a id="DCMS-2"></a>DCMS-2 | List Of Dictionaries | pd.DataFrame([{'col1': 1, 'col2': 3}, {'col1': 2, 'col2': 4}]) | Creates a DataFrame where each dictionary represents a row, with keys as column names.                                                                                                | ✅          |
-| <a id="DCMS-6"></a>DCMS-6 | From Csv             | pd.read_csv('file.csv', usecols=["a","b"])                     | Loads data from a CSV file into a DataFrame.                                                                                                                                          | ✅          |
+| id                          | title                | code                                                           | description                                                                                                                                                                           | supported   |
+|:----------------------------|:---------------------|:---------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------------|
+| <a id="DCMS-1"></a>DCMS-1   | Dictionary Of Lists  | pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})                 | Creates a DataFrame from a dictionary where keys become column names and list values become the data for each column. This is fully supported in frame-check as the primary use case. | ✅          |
+| <a id="DCMS-2"></a>DCMS-2   | List Of Dictionaries | pd.DataFrame([{'col1': 1, 'col2': 3}, {'col1': 2, 'col2': 4}]) | Creates a DataFrame where each dictionary represents a row, with keys as column names.                                                                                                | ✅          |
+| <a id="DCMS-6"></a>DCMS-6   | From Csv             | pd.read_csv('file.csv', usecols=["a","b"])                     | Loads data from a CSV file into a DataFrame.                                                                                                                                          | ✅          |
+| <a id="DCMS-7"></a>DCMS-7   | From Json            | pd.read_json('file.json')                                      | Loads data from a JSON file into a DataFrame.                                                                                                                                         | ✅          |
+| <a id="DCMS-9"></a>DCMS-9   | From Excel           | pd.read_excel('file.xlsx')                                     | Loads data from an Excel file into a DataFrame.                                                                                                                                       | ✅          |
+| <a id="DCMS-10"></a>DCMS-10 | From Parquet         | pd.read_parquet('file.parquet')                                | Loads data from a Parquet file into a DataFrame.                                                                                                                                      | ✅          |
 
 ### column_assignment_methods
 
@@ -138,8 +141,24 @@ Each component should then have a README.md file with instructions on how to run
 |:--------------------------|:------------------|:-------------------------------------------|:------------------------------------------------------------------------------------------------------------|:------------|
 | <a id="CAM-1"></a>CAM-1   | Direct Assignment | df["c"] = [7, 8, 9]                        | The most common method for assigning values to a column. If the column doesn't exist, it creates a new one. | ✅          |
 | <a id="CAM-7"></a>CAM-7   | Assign Method     | df = df.assign(A=[1, 2, 3])                | Returns a new DataFrame with the column added or modified. Great for method chaining.                       | ✅          |
-| <a id="CAM-9"></a>CAM-9   | Insert Method     | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                | ❌          |
+| <a id="CAM-9"></a>CAM-9   | Insert Method     | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                | ✅          |
 | <a id="CAM-10"></a>CAM-10 | Setitem With List | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]] | Assigns multiple columns at once, either from other columns or external values.                             | ✅          |
+
+### column_removal_methods
+
+| id                      | title             | code                             | description                                                     | supported   |
+|:------------------------|:------------------|:---------------------------------|:----------------------------------------------------------------|:------------|
+| <a id="CRM-1"></a>CRM-1 | Del Statement     | del df['A']                      | In-place removal of a column using the Python del statement.    | ✅          |
+| <a id="CRM-2"></a>CRM-2 | Drop Method       | df = df.drop('A', axis=1)        | Returns a new DataFrame with the specified column removed.      | ✅          |
+| <a id="CRM-3"></a>CRM-3 | Drop With Columns | df = df.drop(columns=['A', 'B']) | More explicit way to drop columns using the columns parameter.  | ✅          |
+| <a id="CRM-4"></a>CRM-4 | Drop Multiple     | df = df.drop(['A','B'], axis=1)  | Removes multiple columns at once using a list of column names.  | ✅          |
+| <a id="CRM-5"></a>CRM-5 | Pop Method        | removed = df.pop('A')            | Removes a column from the DataFrame and returns it as a Series. | ✅          |
+
+### edge_cases
+
+| id                    | title             | code                                   | description                                                    | supported   |
+|:----------------------|:------------------|:---------------------------------------|:---------------------------------------------------------------|:------------|
+| <a id="EC-2"></a>EC-2 | Rename Operations | df = df.rename(columns={'old': 'new'}) | Changes column names while preserving their data and position. | ✅          |
 
 Note: the full list of supported features can be found [here](https://frame-check.github.io/frame-check/features/).
 

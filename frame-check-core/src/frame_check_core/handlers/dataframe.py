@@ -1,4 +1,16 @@
+from ..diagnostic import IllegalAccess
 from .models import DF, DFFuncResult, Result, idx_or_key
+
+
+def _column_labels(value: Result) -> set[str] | None:
+    """Resolve a column label argument (`"A"` or `["A", "B"]`) to known names."""
+    match value:
+        case str():
+            return {value}
+        case list():
+            return {label for label in value if isinstance(label, str)}
+        case _:
+            return None
 
 
 @DF.register("assign")
@@ -49,3 +61,45 @@ def df_rename(
     if inplace is True:
         return new_columns, None, None
     return columns, new_columns, None
+
+
+@DF.register("drop")
+def df_drop(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    labels = _column_labels(idx_or_key(args, keywords, key="columns"))
+
+    # Labels+axis form: df.drop(["a"], axis=1) / axis="columns"
+    if labels is None:
+        axis = idx_or_key(args, keywords, key="axis")
+        if axis == 1 or axis == "columns":
+            labels = _column_labels(idx_or_key(args, keywords, idx=0, key="labels"))
+
+    inplace = idx_or_key(args, keywords, key="inplace")
+
+    # Unresolvable labels (or index-only drop) leave columns untouched
+    new_columns = columns - labels if labels else columns
+
+    # Missing labels raise KeyError unless errors="ignore"
+    error = None
+    errors = idx_or_key(args, keywords, key="errors")
+    if labels and errors != "ignore" and (missing := labels - columns):
+        error = IllegalAccess(missing=sorted(missing))
+
+    if inplace is True:
+        return new_columns, None, error
+    return columns, new_columns, error
+
+
+@DF.register("pop")
+def df_pop(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Removes the column in place and returns it as a Series
+    column = idx_or_key(args, keywords, idx=0, key="item")
+    if not isinstance(column, str):
+        return columns, None, None
+    if column not in columns:
+        return columns, None, IllegalAccess(missing=[column])
+    columns.remove(column)
+    return columns, None, None
