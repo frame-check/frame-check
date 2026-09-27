@@ -29,7 +29,7 @@ Example:
 """
 
 import ast
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Self
 
@@ -69,6 +69,18 @@ def format_diagnostic(
 
 
 _generic_visit = ast.NodeVisitor.generic_visit
+
+
+def _root_name(expr: ast.expr) -> str | None:
+    """Return the name a method chain starts from (`df` in `df.a().b()`)."""
+    while True:
+        match expr:
+            case ast.Call(func=ast.Attribute(value=inner)):
+                expr = inner
+            case ast.Name(id=name):
+                return name
+            case _:
+                return None
 
 
 def _references_name(node: ast.AST, name: str) -> bool:
@@ -252,6 +264,76 @@ class Checker(ast.NodeVisitor):
 
         return False
 
+    def _call_method(
+        self, label: str, columns: Iterable[str], call: ast.Call, method_name: str
+    ) -> tuple[DF, DF, DF | None] | None:
+        """
+        Run the registered handler for `method_name` on a frame's columns.
+
+        Reports any error returned by the handler as a diagnostic.
+
+        Args:
+            label: How the frame is referred to in diagnostics (e.g. 'df').
+            columns: The frame's columns before the call.
+            call: The method call AST node.
+            method_name: The DataFrame method being called.
+
+        Returns:
+            The (original, updated, returned) frames, or None if the method
+            has no registered handler.
+        """
+        method = DF(columns).get_method(method_name)
+        if method is None:
+            return None
+
+        updated_df, returned_df, error = method(
+            call.args, call.keywords, self.definitions
+        )
+        if error is not None:
+            self.diagnostics.append(
+                diagnostic.missing_columns(
+                    action=f"{label}.{method_name}()",
+                    missing_cols=error.missing,
+                    node=call,
+                    df_name=label,
+                    available_cols=list(method.df.columns),
+                )
+            )
+        return method.df, updated_df, returned_df
+
+    def _eval_frame(self, expr: ast.expr) -> tuple[str, set[str]] | None:
+        """
+        Evaluate the columns of a DataFrame-valued expression.
+
+        Handles tracked names (`df`) and method chains rooted at one
+        (`df.assign(A=1).drop(columns="B")`). In-place effects on the
+        intermediate frames of a chain are discarded, like at runtime.
+
+        Args:
+            expr: The expression to evaluate.
+
+        Returns:
+            A (label, columns) pair, where the label describes the expression
+            for diagnostics, or None if it isn't a known DataFrame.
+        """
+        match expr:
+            case ast.Name(id=name):
+                tracker = self.dfs.get(name)
+                if tracker is None:
+                    return None
+                return name, set(tracker.columns)
+            case ast.Call(func=ast.Attribute(value=inner, attr=method_name)):
+                frame = self._eval_frame(inner)
+                if frame is None:
+                    return None
+                label, columns = frame
+                result = self._call_method(label, columns, expr, method_name)
+                if result is None or result[2] is None:
+                    return None
+                return f"{label}.{method_name}(...)", result[2].columns
+            case _:
+                return None
+
     def _try_dataframe_method(self, call: ast.expr, target: str | None) -> bool:
         """
         Attempt to detect and handle DataFrame method calls.
@@ -260,6 +342,7 @@ class Checker(ast.NodeVisitor):
         - `df = df.assign(new_col=values)` (returns a new DataFrame)
         - `df.insert(1, "new_col", values)` (modifies `df` in place)
         - `s = df.pop("col")` (modifies `df` in place, returns a Series)
+        - `df = df.assign(A=1).assign(B=2)` (method chains)
 
         In-place changes are applied to the source DataFrame's tracker, while
         a returned DataFrame is bound to `target`.
@@ -272,49 +355,44 @@ class Checker(ast.NodeVisitor):
         Returns:
             True if a DataFrame method was handled, False otherwise.
         """
-        # Match: df.method(...)
+        # Match: <frame>.method(...)
         match call:
-            case ast.Call(
-                func=ast.Attribute(value=ast.Name(id=source_df_name), attr=method_name),
-                args=args,
-                keywords=keywords,
-            ):
+            case ast.Call(func=ast.Attribute(value=source, attr=method_name)):
                 pass
             case _:
                 return False
 
-        tracker = self.dfs.get(source_df_name)
-        if tracker is None:
+        tracker = None
+        columns: Iterable[str]
+        if isinstance(source, ast.Name):
+            tracker = self.dfs.get(source.id)
+            if tracker is None:
+                return False
+            label, columns = source.id, tracker.columns.keys()
+        else:
+            # Method chain: the source is an intermediate frame
+            frame = self._eval_frame(source)
+            if frame is None:
+                return False
+            label, columns = frame
+
+        result = self._call_method(label, columns, call, method_name)
+        if result is None:
             return False
+        original_df, updated_df, returned_df = result
 
-        method = DF(tracker.columns).get_method(method_name)
-        if method is None:
-            return False
-
-        updated_df, returned_df, error = method(args, keywords, self.definitions)
-
-        if error is not None:
-            self.diagnostics.append(
-                diagnostic.missing_columns(
-                    action=f"{source_df_name}.{method_name}()",
-                    missing_cols=error.missing,
-                    node=call,
-                    df_name=source_df_name,
-                    available_cols=list(tracker.columns),
-                )
-            )
-
-        if updated_df.columns != method.df.columns:
+        if tracker is not None and updated_df.columns != original_df.columns:
             tracker.set_columns(updated_df.columns)
 
         if target is None:
             return True
 
         if returned_df is not None:
-            if target == source_df_name:
+            target_tracker = self.dfs.get(target)
+            if target_tracker is not None and _root_name(call) == target:
                 # df = df.method(...): diff the existing tracker instead of
                 # rebuilding it, which also keeps column dependencies.
-                tracker.set_columns(returned_df.columns)
+                target_tracker.set_columns(returned_df.columns)
             else:
                 self.dfs[target] = Tracker.new_with_columns(
                     target, columns=list(returned_df.columns)

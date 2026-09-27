@@ -58,7 +58,6 @@ df.assign(A=[1, 2, 3])["A"]
 
 
 @pytest.mark.support(code="#CAM-7-2")
-@pytest.mark.xfail(reason="Not implemented", strict=True)
 def test_cam_7_2_assign_chain():
     """df = df.assign(A=[1, 2, 3]).assign(B=[4, 5, 6]) - chained assign"""
     code = """
@@ -72,6 +71,65 @@ df["B"]
     df = fc.dfs.get("df")
     assert df is not None
     assert set(df.columns.keys()) == {"A", "B"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-7-3")
+def test_cam_7_3_chain_with_other_methods():
+    """df2 = df.assign(C=1).drop(columns="A").rename(columns={"B": "b"})"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1], "B": [2]})
+df2 = df.assign(C=1).drop(columns="A").rename(columns={"B": "b"})
+df["A"]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B"}
+    assert set(fc.dfs["df2"].columns.keys()) == {"b", "C"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-7-4")
+def test_cam_7_4_chain_reports_errors_in_intermediate_steps():
+    """Errors inside a chain are reported for the step that raises."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(B=1).drop(columns="X").assign(C=2)
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df.assign(...).drop(): column 'X' does not exist"
+    )
+
+
+@pytest.mark.support(code="#CAM-7-5")
+def test_cam_7_5_chain_keeps_column_dependencies():
+    """df = df.assign(...).assign(...) keeps dependencies on the tracker."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df["C"] = df["A"]
+df = df.assign(B=1).assign(D=2)
+"""
+    fc = Checker.check(code)
+    assert fc.dfs["df"].columns["C"] == {"A"}
+
+
+@pytest.mark.support(code="#CAM-7-6")
+def test_cam_7_6_chain_on_untracked_frame_is_ignored():
+    """Chains rooted at unknown frames or unregistered methods are skipped."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+other = load().assign(B=1)
+df2 = df.sort_values("A").assign(B=1)
+"""
+    fc = Checker.check(code)
+    assert "other" not in fc.dfs
+    assert "df2" not in fc.dfs
     assert len(fc.diagnostics) == 0
 
 
