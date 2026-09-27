@@ -1,6 +1,17 @@
 from .models import DF, DFFuncResult, Result, idx_or_key
 
 
+def _column_labels(value: Result) -> set[str] | None:
+    """Resolve a column label argument (`"A"` or `["A", "B"]`) to known names."""
+    match value:
+        case str():
+            return {value}
+        case list():
+            return {label for label in value if isinstance(label, str)}
+        case _:
+            return None
+
+
 @DF.register("assign")
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
@@ -45,6 +56,28 @@ def df_rename(
             new_columns.add(col_mapping[col])
         else:
             new_columns.add(col)
+
+    if inplace is True:
+        return new_columns, None, None
+    return columns, new_columns, None
+
+
+@DF.register("drop")
+def df_drop(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    labels = _column_labels(idx_or_key(args, keywords, key="columns"))
+
+    # Labels+axis form: df.drop(["a"], axis=1) / axis="columns"
+    if labels is None:
+        axis = idx_or_key(args, keywords, key="axis")
+        if axis == 1 or axis == "columns":
+            labels = _column_labels(idx_or_key(args, keywords, idx=0, key="labels"))
+
+    inplace = idx_or_key(args, keywords, key="inplace")
+
+    # Unresolvable labels (or index-only drop) leave columns untouched
+    new_columns = columns - labels if labels else columns
 
     if inplace is True:
         return new_columns, None, None
