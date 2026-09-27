@@ -138,29 +138,31 @@ Each component should then have a README.md file with instructions on how to run
 
 ### column_assignment_methods
 
-| id                        | title              | code                                       | description                                                                                                 | supported   |
-|:--------------------------|:-------------------|:-------------------------------------------|:------------------------------------------------------------------------------------------------------------|:------------|
-| <a id="CAM-1"></a>CAM-1   | Direct Assignment  | df["c"] = [7, 8, 9]                        | The most common method for assigning values to a column. If the column doesn't exist, it creates a new one. | ✅          |
-| <a id="CAM-7"></a>CAM-7   | Assign Method      | df = df.assign(A=[1, 2, 3])                | Returns a new DataFrame with the column added or modified. Great for method chaining.                       | ✅          |
-| <a id="CAM-8"></a>CAM-8   | Multiple Assign    | df = df.assign(B=1, C=2)                   | Creates multiple columns at once using keyword arguments.                                                   | ✅          |
-| <a id="CAM-9"></a>CAM-9   | Insert Method      | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                | ✅          |
-| <a id="CAM-10"></a>CAM-10 | Setitem With List  | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]] | Assigns multiple columns at once, either from other columns or external values.                             | ✅          |
-| <a id="CAM-12"></a>CAM-12 | Concat             | df = pd.concat([df, new_df], axis=1)       | Combines columns from two DataFrames through horizontal concatenation.                                      | ✅          |
-| <a id="CAM-13"></a>CAM-13 | Join               | df = df.join(other_df)                     | Adds columns from another DataFrame based on index alignment.                                               | ✅          |
-| <a id="CAM-14"></a>CAM-14 | Merge              | df = df.merge(df2, on='key')               | Adds columns through merging DataFrames on common columns or indices.                                       | ✅          |
-| <a id="CAM-16"></a>CAM-16 | From Query Results | df['new'] = df.query('A > 0')['B']         | Assigns values from a filtered subset of another column.                                                    | ✅          |
+| id                        | title                | code                                       | description                                                                                                                         | supported   |
+|:--------------------------|:---------------------|:-------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:------------|
+| <a id="CAM-1"></a>CAM-1   | Direct Assignment    | df["c"] = [7, 8, 9]                        | The most common method for assigning values to a column. If the column doesn't exist, it creates a new one.                         | ✅          |
+| <a id="CAM-2"></a>CAM-2   | Attribute Assignment | df.col = value                             | Only updates an existing column. Assigning a new attribute name does not create a column (pandas warns and sets a plain attribute). | ✅          |
+| <a id="CAM-7"></a>CAM-7   | Assign Method        | df = df.assign(A=[1, 2, 3])                | Returns a new DataFrame with the column added or modified. Great for method chaining.                                               | ✅          |
+| <a id="CAM-8"></a>CAM-8   | Multiple Assign      | df = df.assign(B=1, C=2)                   | Creates multiple columns at once using keyword arguments.                                                                           | ✅          |
+| <a id="CAM-9"></a>CAM-9   | Insert Method        | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                                        | ✅          |
+| <a id="CAM-10"></a>CAM-10 | Setitem With List    | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]] | Assigns multiple columns at once, either from other columns or external values.                                                     | ✅          |
+| <a id="CAM-12"></a>CAM-12 | Concat               | df = pd.concat([df, new_df], axis=1)       | Combines columns from two DataFrames through horizontal concatenation.                                                              | ✅          |
+| <a id="CAM-13"></a>CAM-13 | Join                 | df = df.join(other_df)                     | Adds columns from another DataFrame based on index alignment.                                                                       | ✅          |
+| <a id="CAM-14"></a>CAM-14 | Merge                | df = df.merge(df2, on='key')               | Adds columns through merging DataFrames on common columns or indices.                                                               | ✅          |
+| <a id="CAM-16"></a>CAM-16 | From Query Results   | df['new'] = df.query('A > 0')['B']         | Assigns values from a filtered subset of another column.                                                                            | ✅          |
 
 ### column_removal_methods
 
-| id                      | title             | code                             | description                                                        | supported   |
-|:------------------------|:------------------|:---------------------------------|:-------------------------------------------------------------------|:------------|
-| <a id="CRM-1"></a>CRM-1 | Del Statement     | del df['A']                      | In-place removal of a column using the Python del statement.       | ✅          |
-| <a id="CRM-2"></a>CRM-2 | Drop Method       | df = df.drop('A', axis=1)        | Returns a new DataFrame with the specified column removed.         | ✅          |
-| <a id="CRM-3"></a>CRM-3 | Drop With Columns | df = df.drop(columns=['A', 'B']) | More explicit way to drop columns using the columns parameter.     | ✅          |
-| <a id="CRM-4"></a>CRM-4 | Drop Multiple     | df = df.drop(['A','B'], axis=1)  | Removes multiple columns at once using a list of column names.     | ✅          |
-| <a id="CRM-5"></a>CRM-5 | Pop Method        | removed = df.pop('A')            | Removes a column from the DataFrame and returns it as a Series.    | ✅          |
-| <a id="CRM-7"></a>CRM-7 | Select Subset     | df = df[['A', 'B']]              | Keeps only the specified columns, effectively removing all others. | ✅          |
-| <a id="CRM-8"></a>CRM-8 | Loc Selection     | df = df.loc[:, ['A', 'B']]       | Label-based selection that keeps only the specified columns.       | ✅          |
+| id                      | title             | code                             | description                                                           | supported   |
+|:------------------------|:------------------|:---------------------------------|:----------------------------------------------------------------------|:------------|
+| <a id="CRM-1"></a>CRM-1 | Del Statement     | del df['A']                      | In-place removal of a column using the Python del statement.          | ✅          |
+| <a id="CRM-2"></a>CRM-2 | Drop Method       | df = df.drop('A', axis=1)        | Returns a new DataFrame with the specified column removed.            | ✅          |
+| <a id="CRM-3"></a>CRM-3 | Drop With Columns | df = df.drop(columns=['A', 'B']) | More explicit way to drop columns using the columns parameter.        | ✅          |
+| <a id="CRM-4"></a>CRM-4 | Drop Multiple     | df = df.drop(['A','B'], axis=1)  | Removes multiple columns at once using a list of column names.        | ✅          |
+| <a id="CRM-5"></a>CRM-5 | Pop Method        | removed = df.pop('A')            | Removes a column from the DataFrame and returns it as a Series.       | ✅          |
+| <a id="CRM-6"></a>CRM-6 | Assign None       | df = df.assign(col=None)         | Does not remove the column: it keeps it with every value set to None. | ✅          |
+| <a id="CRM-7"></a>CRM-7 | Select Subset     | df = df[['A', 'B']]              | Keeps only the specified columns, effectively removing all others.    | ✅          |
+| <a id="CRM-8"></a>CRM-8 | Loc Selection     | df = df.loc[:, ['A', 'B']]       | Label-based selection that keeps only the specified columns.          | ✅          |
 
 ### edge_cases
 

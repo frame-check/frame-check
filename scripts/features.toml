@@ -110,9 +110,9 @@ supported = true
 [column_assignment_methods.cam_2]
 title = "Attribute assignment"
 code = """df.col = value"""
-description = "Works only for valid Python identifiers. Not recommended for production code due to potential conflicts with DataFrame methods."
-tested = false
-supported = false
+description = "Only updates an existing column. Assigning a new attribute name does not create a column (pandas warns and sets a plain attribute)."
+tested = true
+supported = true
 
 [column_assignment_methods.cam_3]
 title = "loc indexer"
@@ -315,9 +315,9 @@ supported = true
 [column_removal_methods.crm_6]
 title = "Assign None"
 code = """df = df.assign(col=None)"""
-description = "Indirect method of column removal by assigning None (not common)."
-tested = false
-supported = false
+description = "Does not remove the column: it keeps it with every value set to None."
+tested = true
+supported = true
 
 [column_removal_methods.crm_7]
 title = "Select subset"
