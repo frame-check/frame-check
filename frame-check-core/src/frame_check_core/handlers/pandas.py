@@ -76,3 +76,25 @@ def pd_merge(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
     right = idx_or_key(args, keywords, idx=1, key="right")
     params = bind_positional(args[2:], keywords, MERGE_PARAMS)
     return merge_columns(left.columns, left.label, right, params)
+
+
+@PD.register("concat")
+def pd_concat(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.concat([df1, df2, ...]) for tracked frames."""
+    objs = idx_or_key(args, keywords, idx=0, key="objs")
+    if not (isinstance(objs, list) and objs and all(isinstance(o, DF) for o in objs)):
+        # Series, dicts or unresolved frames: columns unknown
+        return None, None
+    frames = [o.columns for o in objs if isinstance(o, DF)]
+
+    axis = keywords.get("axis", 0)
+    if axis in (0, "index"):
+        if keywords.get("join", "outer") == "inner":
+            return set.intersection(*frames), None
+        return set.union(*frames), None
+    if axis in (1, "columns"):
+        if "keys" in keywords or keywords.get("ignore_index") is True:
+            # MultiIndex or renumbered columns
+            return None, None
+        return set.union(*frames), None
+    return None, None

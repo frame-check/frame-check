@@ -153,3 +153,38 @@ def test_cam_13_1_join_on_missing_column_is_reported():
 def test_cam_13_2_unresolvable_join_stops_tracking(expr: str):
     fc = Checker.check(SETUP + f"out = {expr}\n")
     assert "out" not in fc.dfs
+
+
+CONCAT_CASES = [
+    "pd.concat([L, L])",
+    "pd.concat([L, R])",
+    "pd.concat((L, R2), ignore_index=True)",
+    'pd.concat([L, R], join="inner")',
+    'pd.concat([L, R], keys=["l", "r"])',
+    "pd.concat([L[['a']], R[['b']]], axis=1)",
+    'pd.concat([L, R.drop(columns="v")], axis="columns")',
+    "pd.concat(objs=[L, R])",
+    "pd.concat([L, R]).drop(columns='v')",
+]
+
+
+@pytest.mark.support(code="#CAM-12")
+@pytest.mark.parametrize("expr", CONCAT_CASES)
+def test_cam_12_concat_matches_pandas(expr: str):
+    assert _checker_columns(expr) == _pandas_columns(expr)
+
+
+@pytest.mark.support(code="#CAM-12-1")
+@pytest.mark.parametrize(
+    "expr",
+    [
+        'pd.concat([L, R], axis=1, keys=["l", "r"])',  # MultiIndex columns
+        "pd.concat([L, R], axis=1, ignore_index=True)",  # renumbered columns
+        'pd.concat([L, R["b"]], axis=1)',  # Series
+        "pd.concat({'l': L, 'r': R})",
+        "pd.concat(frames)",
+    ],
+)
+def test_cam_12_1_unresolvable_concat_stops_tracking(expr: str):
+    fc = Checker.check(SETUP + f"out = {expr}\n")
+    assert "out" not in fc.dfs
