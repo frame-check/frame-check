@@ -80,6 +80,27 @@ class CodeRegion:
         return cls(start=start_position, end=end_position)
 
     @classmethod
+    def from_method_call(cls, *, node: ast.Call) -> Self:
+        """
+        Construct a CodeRegion spanning a method call from its name, e.g.
+        `drop(columns="X")` in `df.assign(A=1).drop(columns="X")`.
+
+        Falls back to the whole call when it isn't a method call.
+        """
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.end_lineno is None:
+            return cls.from_ast_node(node=node)
+        # The attribute node ends right after the method name
+        start_col = (func.end_col_offset or 0) - len(func.attr)
+        return cls(
+            start=CodePosition(row=func.end_lineno, col=start_col),
+            end=CodePosition(
+                row=(node.end_lineno or node.lineno) + 1,
+                col=node.end_col_offset or node.col_offset,
+            ),
+        )
+
+    @classmethod
     def from_tuples(cls, *, start: tuple[int, int], end: tuple[int, int]) -> Self:
         """Shorthand to create a CodeRegion from start and end tuples."""
 

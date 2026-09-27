@@ -262,6 +262,7 @@ def missing_columns(
     node: ast.expr,
     df_name: str,
     available_cols: list[str],
+    region: CodeRegion | None = None,
 ) -> Diagnostic:
     """
     Create a diagnostic for an operation on non-existent columns.
@@ -276,6 +277,7 @@ def missing_columns(
         node: The AST node of the operation (for location info).
         df_name: The name of the DataFrame variable (e.g., 'df').
         available_cols: List of columns that actually exist on the DataFrame.
+        region: Where to point the diagnostic; defaults to the whole `node`.
 
     Returns:
         A Diagnostic with the error message, suggestions for similar column
@@ -309,6 +311,6 @@ def missing_columns(
     return Diagnostic(
         message="\n".join(lines),
         severity=Severity.ERROR,
-        region=CodeRegion.from_ast_node(node=node),
+        region=region or CodeRegion.from_ast_node(node=node),
         name_suggestion=first_suggestion,
     )

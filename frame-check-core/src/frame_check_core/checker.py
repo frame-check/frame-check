@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Self
 
 from frame_check_core import diagnostic
+from frame_check_core.diagnostic.region import CodeRegion
 from frame_check_core.extractors import extract, extract_single_column_ref
 
 # Ensure pandas and dataframe handlers are registered
@@ -579,6 +580,7 @@ class Checker(ast.NodeVisitor):
                     action=f"{label}.{method_name}()",
                     missing_cols=error.missing,
                     node=call,
+                    region=CodeRegion.from_method_call(node=call),
                     df_name=error.frame or label,
                     available_cols=(
                         error.available

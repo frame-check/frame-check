@@ -457,3 +457,20 @@ print(pd.DataFrame({"A": [1]})["Z"])
     checker = Checker.check(code)
     assert len(checker.diagnostics) == 1
     assert "DataFrame 'pd.DataFrame(...)'" in checker.diagnostics[0].message
+
+
+def test_method_error_points_at_the_failing_method():
+    """Errors in a multi-line chain point at the method that raises."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+out = (
+    df.assign(B=1)
+    .drop(columns="X")
+)
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    region = checker.diagnostics[0].region
+    assert (region.start.row, region.start.col) == (6, 5)
+    assert (region.end.row, region.end.col) == (7, 22)
