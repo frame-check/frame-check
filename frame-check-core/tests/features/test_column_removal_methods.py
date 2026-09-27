@@ -242,3 +242,64 @@ df['anything']
     fc = Checker.check(code)
     assert "df" not in fc.dfs
     assert len(fc.diagnostics) == 0
+
+
+# --- Removing non-existent columns (raises KeyError at runtime) ---
+
+
+@pytest.mark.support(code="#CRM-1-3")
+def test_crm_1_3_del_missing_column_is_reported():
+    """del df['X'] on a missing column is reported with a suggestion."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'Name': [1]})
+del df['Nmae']
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    diag = fc.diagnostics[0]
+    assert diag.message.startswith("del: column 'Nmae' does not exist")
+    assert diag.name_suggestion == "Name"
+    assert diag.region.start.row == 4
+
+
+@pytest.mark.support(code="#CRM-2-6")
+def test_crm_2_6_drop_missing_columns_is_reported():
+    """df.drop(columns=[...]) with missing labels is reported."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df = df.drop(columns=['A', 'X'])
+df['B']
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df.drop(): column 'X' does not exist on DataFrame 'df'."
+    )
+
+
+@pytest.mark.support(code="#CRM-2-7")
+def test_crm_2_7_drop_missing_columns_errors_ignore():
+    """errors='ignore' silently skips missing labels."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df.drop(columns=['A', 'X'], errors='ignore', inplace=True)
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"B"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CRM-5-3")
+def test_crm_5_3_pop_missing_column_is_reported():
+    """df.pop('X') on a missing column is reported."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+x = df.pop('X')
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith("df.pop(): column 'X' does not exist")

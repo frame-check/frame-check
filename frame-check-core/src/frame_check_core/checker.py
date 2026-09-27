@@ -284,7 +284,18 @@ class Checker(ast.NodeVisitor):
         if method is None:
             return False
 
-        updated_df, returned_df, _error = method(args, keywords, self.definitions)
+        updated_df, returned_df, error = method(args, keywords, self.definitions)
+
+        if error is not None:
+            self.diagnostics.append(
+                diagnostic.missing_columns(
+                    action=f"{source_df_name}.{method_name}()",
+                    missing_cols=error.missing,
+                    node=call,
+                    df_name=source_df_name,
+                    available_cols=list(tracker.columns),
+                )
+            )
 
         if updated_df.columns != method.df.columns:
             tracker.set_columns(updated_df.columns)
@@ -427,6 +438,16 @@ class Checker(ast.NodeVisitor):
             tracker = self.dfs.get(ref.df_name)
             if tracker is None:
                 continue
+            if missing := [c for c in ref.col_names if c not in tracker.columns]:
+                self.diagnostics.append(
+                    diagnostic.missing_columns(
+                        action="del",
+                        missing_cols=missing,
+                        node=ref.node,
+                        df_name=ref.df_name,
+                        available_cols=list(tracker.columns),
+                    )
+                )
             tracker.set_columns(tracker.columns.keys() - ref.col_names)
             # Not a read: don't validate the deleted column afterwards
             self._skip_subscripts.add(id(ref.node))

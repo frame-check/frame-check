@@ -1,3 +1,4 @@
+from ..diagnostic import IllegalAccess
 from .models import DF, DFFuncResult, Result, idx_or_key
 
 
@@ -79,9 +80,15 @@ def df_drop(
     # Unresolvable labels (or index-only drop) leave columns untouched
     new_columns = columns - labels if labels else columns
 
+    # Missing labels raise KeyError unless errors="ignore"
+    error = None
+    errors = idx_or_key(args, keywords, key="errors")
+    if labels and errors != "ignore" and (missing := labels - columns):
+        error = IllegalAccess(missing=sorted(missing))
+
     if inplace is True:
-        return new_columns, None, None
-    return columns, new_columns, None
+        return new_columns, None, error
+    return columns, new_columns, error
 
 
 @DF.register("pop")
@@ -90,6 +97,9 @@ def df_pop(
 ) -> DFFuncResult:
     # Removes the column in place and returns it as a Series
     column = idx_or_key(args, keywords, idx=0, key="item")
-    if isinstance(column, str):
-        columns.discard(column)
+    if not isinstance(column, str):
+        return columns, None, None
+    if column not in columns:
+        return columns, None, IllegalAccess(missing=[column])
+    columns.remove(column)
     return columns, None, None
