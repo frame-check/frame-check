@@ -21,7 +21,7 @@ _diagnostic_suggestions: dict[str, list[tuple[types.Diagnostic, Diagnostic]]] = 
 async def frame_diagnostics(
     ls: LanguageServer, params: types.DidOpenTextDocumentParams
 ):
-    global fc, _diagnostic_suggestions
+    global fc
     text_doc = ls.workspace.get_text_document(params.text_document.uri)
     contents = text_doc.source
     ls_diagnostics: list[types.Diagnostic] = []
@@ -167,8 +167,6 @@ def code_actions(
 @server.feature(types.TEXT_DOCUMENT_HOVER)
 def hover(ls: LanguageServer, params: types.HoverParams) -> types.Hover | None:
     """Show DataFrame columns on hover."""
-    global fc
-
     text_doc = ls.workspace.get_text_document(params.text_document.uri)
     contents = text_doc.source
     lines = contents.splitlines()

@@ -47,6 +47,10 @@ typeCheckingMode = "basic"
 [tool.ruff]
 exclude = ['frame-check-extensions']
 
+[tool.ruff.lint.per-file-ignores]
+# Benchmark fixture: representative user code, kept as-is
+"frame-check-core/tests/bench/long_pandas.py" = ["DTZ005"]
+
 
 [tool.frame-check]
 exclude = [

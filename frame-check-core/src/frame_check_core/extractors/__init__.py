@@ -42,15 +42,15 @@ from .column import extract_column_ref, extract_single_column_ref
 from .registry import Extractor
 
 __all__ = [
-    # Registry
-    "Extractor",
     # Types
     "ColumnRef",
+    # Registry
+    "Extractor",
+    "extract",
     # Individual extractors (for direct use)
     "extract_column_ref",
-    "extract_single_column_ref",
     "extract_column_refs_from_binop",
-    "extract",
+    "extract_single_column_ref",
 ]
 
 

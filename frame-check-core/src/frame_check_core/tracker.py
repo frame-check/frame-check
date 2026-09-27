@@ -12,7 +12,7 @@ class Tracker[M: Strict | Relaxed]:
     In 'relaxed' mode: Missing dependencies are auto-created, never returns errors.
     """
 
-    __slots__ = ("id_", "columns", "mode", "_is_strict")
+    __slots__ = ("_is_strict", "columns", "id_", "mode")
 
     def __init__(self, id_: str, mode: M = "strict") -> None:  # type: ignore[assignment]
         self.id_ = id_

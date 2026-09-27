@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None, override_config: Config | None = None) -
         if args.config:
             try:
                 config = Config.load_from(args.config)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - report any config error to the user
                 print(
                     f"Error loading configuration from {args.config}:\n{e}",
                     file=sys.stderr,
@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None, override_config: Config | None = None) -
         except SyntaxError as e:
             print(f"Syntax error in {file_path}:\n{e}", file=sys.stderr)
             has_errors = True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - keep checking the remaining files
             print(f"Error checking {file_path}:\n{e}", file=sys.stderr)
             has_errors = True
 

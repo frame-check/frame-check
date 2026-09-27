@@ -1,7 +1,7 @@
 import ast
 from dataclasses import dataclass
-from typing import Self
 from functools import cached_property
+from typing import Self
 
 
 @dataclass(kw_only=True, order=True, frozen=True)
@@ -70,7 +70,7 @@ class CodeRegion:
 
         start_position = CodePosition(row=node.lineno, col=node.col_offset)
 
-        #! lineno and end_lineno are not exclusive, so we add 1
+        # NOTE: lineno and end_lineno are not exclusive, so we add 1
         exclusive_end_row = (node.end_lineno or node.lineno) + 1
         exclusive_end_col_offset = node.end_col_offset or node.col_offset
         end_position = CodePosition(

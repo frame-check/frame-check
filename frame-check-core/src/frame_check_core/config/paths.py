@@ -1,9 +1,9 @@
+import glob
+import re
 from collections.abc import Iterable, Iterator, Sequence
 from fnmatch import fnmatch
-import glob
 from itertools import combinations
 from pathlib import Path
-import re
 
 
 def normalize_pattern(pattern: str, recursive: bool) -> str:
@@ -93,16 +93,12 @@ def path_parts_match(path_parts: Sequence[str], pattern_parts: Sequence[str]) ->
             )
         else:
             # Use fnmatch to handle non-recursive wildcards
-            if fnmatch(path_parts[0], pattern_parts[0]):
-                return path_parts_match(path_parts[1:], pattern_parts[1:])
-            else:
-                return False
+            return fnmatch(path_parts[0], pattern_parts[0]) and path_parts_match(
+                path_parts[1:], pattern_parts[1:]
+            )
 
-    elif path_parts or pattern_parts:
-        # Either pattern or path is exhausted before completed match
-        return False
-    else:
-        return True
+    # Match only if both are exhausted; otherwise one ended before the other
+    return not (path_parts or pattern_parts)
 
 
 def path_match(absolute_path: Path, pattern: str) -> bool:
@@ -115,7 +111,7 @@ def path_match(absolute_path: Path, pattern: str) -> bool:
             if "**" in pattern
             else absolute_path.match(pattern)
         )
-    except Exception as e:
+    except ValueError as e:
         print(
             f"Warning: Exception while trying to match path {absolute_path} with pattern {pattern}: {e}. Treating as no match."
         )

@@ -6,13 +6,13 @@ def pd_dataframe(args: list[Result], keywords: dict[str, Result]) -> PDFuncResul
     data = idx_or_key(args, keywords, idx=0, key="data")
     match data:
         case dict():
-            return {k for k in data.keys() if isinstance(k, str)}, None
+            return {k for k in data if isinstance(k, str)}, None
         case list():
             columns: set[str] = set()
             for item in data:
                 if not isinstance(item, dict):
                     return None, None
-                columns |= {k for k in item.keys() if isinstance(k, str)}
+                columns |= {k for k in item if isinstance(k, str)}
             return columns, None
         case _:
             return None, None
