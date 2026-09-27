@@ -1,10 +1,13 @@
-from .models import PD, PDFuncResult, Result, idx_or_key
+from .models import DF, PD, PDFuncResult, Result, idx_or_key
 
 
 @PD.register("DataFrame")
 def pd_dataframe(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
     data = idx_or_key(args, keywords, idx=0, key="data")
     match data:
+        case DF():
+            # Copy constructor: pd.DataFrame(other_df)
+            return set(data.columns), None
         case dict():
             return {k for k in data if isinstance(k, str)}, None
         case list():

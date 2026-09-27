@@ -38,7 +38,9 @@ Result = Union[
 ]
 
 _ASSIGNING_ATTR = "_frame_checker_assigning"
-_RESULT_ATTR = "_frame_checker_result_columns"
+
+# Resolves an argument expression to a tracked frame, if it is one
+FrameResolver = Callable[[ast.expr], "DF | None"]
 
 
 def is_assigning(node: ast.Subscript) -> bool:
@@ -49,7 +51,19 @@ def set_assigning(node: ast.Subscript) -> None:
     setattr(node, _ASSIGNING_ATTR, True)
 
 
-def get_value(node: ast.AST, definitions: dict[str, Result]) -> Result:
+def get_value(
+    node: ast.AST,
+    definitions: dict[str, Result],
+    frames: FrameResolver | None = None,
+) -> Result:
+    # Tracked frames passed as arguments: df.merge(other), pd.DataFrame(df)
+    if (
+        frames is not None
+        and isinstance(node, (ast.Name, ast.Call, ast.Subscript))
+        and (frame := frames(node)) is not None
+    ):
+        return frame
+
     match node:
         case ast.Constant(value=str(result)):
             return result
@@ -64,7 +78,7 @@ def get_value(node: ast.AST, definitions: dict[str, Result]) -> Result:
         case ast.List(elts=elts):
             elements = []
             for elt in elts:
-                parsed_elt = get_value(elt, definitions)
+                parsed_elt = get_value(elt, definitions, frames)
                 elements.append(parsed_elt)
             return elements
 
@@ -77,8 +91,8 @@ def get_value(node: ast.AST, definitions: dict[str, Result]) -> Result:
             for key_node, value_node in zip(keys, values):
                 if key_node is None:
                     continue
-                key = get_result(key_node, definitions)
-                value = get_result(value_node, definitions)
+                key = get_value(key_node, definitions, frames)
+                value = get_value(value_node, definitions, frames)
                 result_dict[key] = value
             return result_dict
 
@@ -106,25 +120,23 @@ def _lambda_columns(body: ast.expr, param: str) -> tuple[str, ...]:
     return tuple(columns)
 
 
-def get_result(node: ast.AST, definitions: dict[str, Result]) -> Result:
-    if hasattr(node, _RESULT_ATTR):
-        return getattr(node, _RESULT_ATTR)
-    else:
-        return get_value(node, definitions)
-
-
-def set_result(node: ast.AST, result: Result) -> None:
-    setattr(node, _RESULT_ATTR, result)
+def get_result(
+    node: ast.AST,
+    definitions: dict[str, Result],
+    frames: FrameResolver | None = None,
+) -> Result:
+    return get_value(node, definitions, frames)
 
 
 def parse_args(
     args: list[ast.expr],
     keywords: list[ast.keyword],
     definitions: dict[str, Result],
+    frames: FrameResolver | None = None,
 ) -> tuple[list[Result], dict[str, Result]]:
-    argsv = [get_result(arg, definitions) for arg in args]
+    argsv = [get_result(arg, definitions, frames) for arg in args]
     keywordsv = {
-        kw.arg: get_result(kw.value, definitions)
+        kw.arg: get_result(kw.value, definitions, frames)
         for kw in keywords
         if kw.arg is not None
     }
@@ -176,6 +188,7 @@ class PDMethod:
         args: list[ast.expr],
         keywords: list[ast.keyword],
         definitions: dict[str, Result] | None = None,
+        frames: FrameResolver | None = None,
     ) -> PDMethodResult:
         """
         Returns a tuple with two elements:
@@ -185,7 +198,7 @@ class PDMethod:
         # If definitions is not provided, fall back to empty dict (for backward compatibility)
         if definitions is None:
             definitions = {}
-        argsv, keywordsv = parse_args(args, keywords, definitions)
+        argsv, keywordsv = parse_args(args, keywords, definitions, frames)
         returned, error = self.func(argsv, keywordsv)
         return DF(returned) if returned is not None else None, error
 
@@ -200,8 +213,10 @@ class DF:
 
     func_registry: ClassVar[dict[str, DFFunc]] = {}
 
-    def __init__(self, columns: Iterable[str]):
+    def __init__(self, columns: Iterable[str], label: str | None = None):
         self.columns: set[str] = set(columns)
+        # How the frame is referred to in diagnostics, e.g. 'df'
+        self.label = label
 
     def get_method(self, method_name: str) -> "DFMethod | None":
         if method_name in self.func_registry:
@@ -227,6 +242,7 @@ class DFMethod:
         args: list[ast.expr],
         keywords: list[ast.keyword],
         definitions: dict[str, Result] | None = None,
+        frames: FrameResolver | None = None,
     ) -> DFMethodResult:
         """
         Returns a tuple with three elements:
@@ -236,6 +252,6 @@ class DFMethod:
         """
         if definitions is None:
             definitions = {}
-        argsv, keywordsv = parse_args(args, keywords, definitions)
+        argsv, keywordsv = parse_args(args, keywords, definitions, frames)
         updated, returned, error = self.func(self.df.columns.copy(), argsv, keywordsv)
         return DF(updated), DF(returned) if returned is not None else None, error

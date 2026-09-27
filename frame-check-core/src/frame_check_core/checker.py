@@ -527,7 +527,9 @@ class Checker(ast.NodeVisitor):
         if function is None:
             return None
         self._evaluated_calls.add(id(call))
-        created_df, _error = function(call.args, call.keywords, self.definitions)
+        created_df, _error = function(
+            call.args, call.keywords, self.definitions, self._frame_arg
+        )
         return None if created_df is None else created_df.columns
 
     def _call_method(
@@ -554,7 +556,7 @@ class Checker(ast.NodeVisitor):
         self._evaluated_calls.add(id(call))
 
         updated_df, returned_df, error = method(
-            call.args, call.keywords, self.definitions
+            call.args, call.keywords, self.definitions, self._frame_arg
         )
         if error is not None:
             self._report(
@@ -568,6 +570,11 @@ class Checker(ast.NodeVisitor):
                 ),
             )
         return method.df, updated_df, returned_df
+
+    def _frame_arg(self, expr: ast.expr) -> DF | None:
+        """Resolve a handler argument to a tracked frame, e.g. `other` in `df.merge(other)`."""
+        frame = self._eval_frame(expr)
+        return None if frame is None else DF(frame[1], label=frame[0])
 
     def _eval_frame(self, expr: ast.expr) -> tuple[str, set[str]] | None:
         """
