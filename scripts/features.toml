@@ -153,8 +153,8 @@ supported = true
 title = "Multiple assign"
 code = """df = df.assign(B=1, C=2)"""
 description = "Creates multiple columns at once using keyword arguments."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_9]
 title = "insert method"
@@ -209,8 +209,8 @@ supported = false
 title = "From query results"
 code = """df['new'] = df.query('A > 0')['B']"""
 description = "Assigns values from a filtered subset of another column."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_17]
 title = "Conditional assignment"
