@@ -139,6 +139,8 @@ class Checker(ast.NodeVisitor):
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
         self.definitions: dict[str, Result] = {}
+        # Every name bound anywhere (loop targets, parameters, imports, ...)
+        self._bound: set[str] = set()
 
     @classmethod
     def check(cls, code: str | Path | ast.Module) -> Self:
@@ -192,9 +194,22 @@ class Checker(ast.NodeVisitor):
         """Leaf nodes can't contain column references, so don't descend."""
 
     # `ast.NodeVisitor.visit_Constant` runs deprecation shims on every
-    # constant, and `Name` would otherwise visit its `ctx` child.
+    # constant.
     visit_Constant = _skip_leaf
-    visit_Name = _skip_leaf
+
+    def visit_Name(self, node: ast.Name) -> None:
+        """Record bound names; don't descend into the `ctx` child."""
+        if type(node.ctx) is ast.Store:
+            self._bound.add(node.id)
+
+    def visit_arg(self, node: ast.arg) -> None:
+        """Record function and lambda parameters as bound names."""
+        self._bound.add(node.arg)
+        self.generic_visit(node)
+
+    def _is_known(self, name: str) -> bool:
+        """Whether `name` refers to a variable the code binds somewhere."""
+        return name in self.definitions or name in self._bound
 
     def visit_Import(self, node: ast.Import) -> None:
         """
@@ -210,6 +225,7 @@ class Checker(ast.NodeVisitor):
             if alias.name == "pandas":
                 # import pandas or import pandas as pd
                 self.pandas_aliases.add(alias.asname or alias.name)
+            self._bound.add(alias.asname or alias.name.partition(".")[0])
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -223,6 +239,8 @@ class Checker(ast.NodeVisitor):
             node: The import-from AST node.
         """
         # TODO: Handle `from pandas import DataFrame` etc.
+        for alias in node.names:
+            self._bound.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def _try_create_dataframe(self, node: ast.Assign) -> bool:
@@ -561,7 +579,7 @@ class Checker(ast.NodeVisitor):
         if target_ref.df_name not in self.dfs:
             # A known variable without a tracked schema (e.g. a dict, or
             # pd.read_csv() without usecols) has nothing to check
-            if target_ref.df_name not in self.definitions:
+            if not self._is_known(target_ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(target_ref.node))
             return self.generic_visit(node)
 
@@ -581,7 +599,7 @@ class Checker(ast.NodeVisitor):
         for ref in read_refs:
             if ref.df_name in self.dfs:
                 tracked_refs.append(ref)
-            elif ref.df_name not in self.definitions:
+            elif not self._is_known(ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(ref.node))
                 return self.generic_visit(node)
         read_refs = tracked_refs

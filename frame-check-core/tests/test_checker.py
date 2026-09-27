@@ -357,3 +357,36 @@ df["B"]
     checker = Checker.check(code)
     assert set(checker.dfs["df"].columns) == {"A"}
     assert len(checker.diagnostics) == 1
+
+
+# --- Bound names are declared ---
+
+
+def test_bound_names_are_not_reported_as_undeclared():
+    """Parameters, loop targets, with-targets and imports are known names."""
+    code = """
+import json
+from collections import OrderedDict as od
+def f(d, *, opts):
+    d["x"] = 1
+    opts["y"] = d["x"]
+for row in rows:
+    row["z"] = 1
+with open("f") as fh:
+    fh["w"] = 1
+json["a"] = 1
+od["b"] = 1
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 0
+
+
+def test_unbound_name_is_still_reported_as_undeclared():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+unknown_df["column"] = df["A"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "not declared" in checker.diagnostics[0].message
