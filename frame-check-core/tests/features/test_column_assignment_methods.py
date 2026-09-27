@@ -142,7 +142,7 @@ def test_cam_7_6_chain_on_untracked_frame_is_ignored():
 import pandas as pd
 df = pd.DataFrame({"A": [1]})
 other = load().assign(B=1)
-df2 = df.reset_index().assign(B=1)
+df2 = df.set_index("A").assign(B=1)
 """
     fc = Checker.check(code)
     assert "other" not in fc.dfs

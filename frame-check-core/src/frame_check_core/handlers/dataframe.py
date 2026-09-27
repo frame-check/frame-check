@@ -395,3 +395,43 @@ def df_join(
         joined.add(column + lsuffix)
         joined.add(column + rsuffix)
     return columns, joined, error
+
+
+_RESET_INDEX_PARAMS = (
+    "level",
+    "drop",
+    "inplace",
+    "col_level",
+    "col_fill",
+    "allow_duplicates",
+    "names",
+)
+
+
+@DF.register("reset_index")
+def df_reset_index(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, _RESET_INDEX_PARAMS)
+    inplace = params.get("inplace") is True
+
+    if params.get("drop") is True:
+        new_columns = columns
+    elif params.get("level") is not None:
+        # Moves some index levels, whose names aren't tracked
+        return (None, None, None) if inplace else (columns, None, None)
+    else:
+        names = params.get("names")
+        if names is None:
+            # The index isn't tracked; a default index becomes "index" (or
+            # "level_0" when taken). A named index's column is typically
+            # still in the tracked columns, since set_index isn't tracked.
+            new_columns = columns | {"level_0" if "index" in columns else "index"}
+        elif isinstance(names, str):
+            new_columns = columns | {names}
+        else:
+            return (None, None, None) if inplace else (columns, None, None)
+
+    if inplace:
+        return new_columns, None, None
+    return columns, new_columns, None
