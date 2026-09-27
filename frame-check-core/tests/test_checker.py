@@ -425,3 +425,35 @@ total = df.drop(columns="X")["A"]
 """
     checker = Checker.check(code)
     assert len(checker.diagnostics) == 4
+
+
+# --- pandas calls as frame expressions ---
+
+
+def test_chain_from_pandas_constructor():
+    """pd.DataFrame(...).assign(...) is tracked through the chain."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]}).assign(B=lambda x: x["A"] * 2)
+df2 = pd.read_csv("f.csv", usecols=["A", "B"])[["A"]]
+df["B"]
+df2["B"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "B"}
+    assert set(checker.dfs["df2"].columns) == {"A"}
+    assert len(checker.diagnostics) == 1
+    assert (
+        "Column 'B' does not exist on DataFrame 'df2'."
+        in checker.diagnostics[0].message
+    )
+
+
+def test_read_from_pandas_constructor_expression():
+    code = """
+import pandas as pd
+print(pd.DataFrame({"A": [1]})["Z"])
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "DataFrame 'pd.DataFrame(...)'" in checker.diagnostics[0].message

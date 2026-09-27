@@ -492,36 +492,43 @@ class Checker(ast.NodeVisitor):
         if not isinstance(target, ast.Name):
             return False
 
-        df_name = target.id
+        if not self._is_pandas_call(node.value):
+            return False
 
-        # Match: df = pd.something(...)
-        match node.value:
-            case ast.Call(
-                func=ast.Attribute(value=ast.Name(id=module_name), attr=method_name),
-                args=args,
-                keywords=keywords,
-            ):
-                # Check if this is a pandas call
-                if module_name not in self.pandas_aliases:
-                    return False
+        frame = self._eval_frame(node.value)
+        if frame is None:
+            return False
 
-                # Try to get a handler for this method
-                method = PD.get_method(method_name)
-                if method is None:
-                    return False
+        # Register the new DataFrame
+        self.dfs[target.id] = Tracker.new_with_columns(
+            target.id, columns=list(frame[1])
+        )
+        return True
 
-                # Call the handler to extract columns
-                created_df, _error = method(args, keywords, self.definitions)
-                if created_df is None:
-                    return False
-
-                # Register the new DataFrame
-                self.dfs[df_name] = Tracker.new_with_columns(
-                    df_name, columns=list(created_df.columns)
-                )
-                return True
-
+    def _is_pandas_call(self, expr: ast.expr) -> bool:
+        """Whether `expr` is a call like `pd.read_csv(...)`."""
+        match expr:
+            case ast.Call(func=ast.Attribute(value=ast.Name(id=module_name))):
+                return module_name in self.pandas_aliases
         return False
+
+    def _call_pandas(self, call: ast.Call, function_name: str) -> set[str] | None:
+        """
+        Run the registered handler for a pandas function call.
+
+        Args:
+            call: The call AST node, e.g. for `pd.read_csv(...)`.
+            function_name: The pandas function being called.
+
+        Returns:
+            The created frame's columns, or None if they can't be determined.
+        """
+        function = PD.get_method(function_name)
+        if function is None:
+            return None
+        self._evaluated_calls.add(id(call))
+        created_df, _error = function(call.args, call.keywords, self.definitions)
+        return None if created_df is None else created_df.columns
 
     def _call_method(
         self, label: str, columns: Iterable[str], call: ast.Call, method_name: str
@@ -566,8 +573,9 @@ class Checker(ast.NodeVisitor):
         """
         Evaluate the columns of a DataFrame-valued expression.
 
-        Handles tracked names (`df`), column subsets (`df[["A", "B"]]`) and
-        method chains rooted at one (`df.assign(A=1).drop(columns="B")`).
+        Handles tracked names (`df`), pandas constructors (`pd.DataFrame(...)`),
+        column subsets (`df[["A", "B"]]`) and method chains rooted at either
+        (`df.assign(A=1).drop(columns="B")`).
         In-place effects on the intermediate frames of a chain are
         discarded, like at runtime. Results are cached per node.
 
@@ -592,6 +600,14 @@ class Checker(ast.NodeVisitor):
                 if tracker is None:
                     return None
                 return name, set(tracker.columns)
+            case ast.Call(
+                func=ast.Attribute(value=ast.Name(id=module_name), attr=function_name)
+            ) if module_name in self.pandas_aliases:
+                # pd.DataFrame({...}), pd.read_csv(..., usecols=[...])
+                columns = self._call_pandas(expr, function_name)
+                if columns is None:
+                    return None
+                return f"{module_name}.{function_name}(...)", columns
             case ast.Call(func=ast.Attribute(value=inner, attr=method_name)):
                 frame = self._eval_frame(inner)
                 if frame is None:
