@@ -29,6 +29,7 @@ Example:
 """
 
 import ast
+from collections.abc import Callable
 from pathlib import Path
 from typing import Self
 
@@ -67,6 +68,9 @@ def format_diagnostic(
     return f"{file_path}:{loc.row}:{loc.col}: {diag.message}"
 
 
+_generic_visit = ast.NodeVisitor.generic_visit
+
+
 class Checker(ast.NodeVisitor):
     """
     AST visitor that validates DataFrame column operations.
@@ -97,6 +101,7 @@ class Checker(ast.NodeVisitor):
         tracking. DataFrames are discovered dynamically by analyzing
         pandas function calls like `pd.read_csv()` or `pd.DataFrame()`.
         """
+        self._dispatch: dict[type[ast.AST], Callable[[Checker, ast.AST], None]] = {}
         self._skip_subscripts: set[int] = set()
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
@@ -135,6 +140,29 @@ class Checker(ast.NodeVisitor):
             tree = ast.parse(code)
         checker.visit(tree)
         return checker
+
+    def visit(self, node: ast.AST) -> None:
+        """
+        Dispatch to the `visit_<NodeType>` method, caching the lookup per class.
+
+        `ast.NodeVisitor.visit` builds the method name and resolves it with
+        `getattr` for every node; caching by node class avoids that work.
+        """
+        cls = node.__class__
+        try:
+            visitor = self._dispatch[cls]
+        except KeyError:
+            visitor = getattr(type(self), "visit_" + cls.__name__, _generic_visit)
+            self._dispatch[cls] = visitor
+        visitor(self, node)
+
+    def _skip_leaf(self, node: ast.AST) -> None:
+        """Leaf nodes can't contain column references, so don't descend."""
+
+    # `ast.NodeVisitor.visit_Constant` runs deprecation shims on every
+    # constant, and `Name` would otherwise visit its `ctx` child.
+    visit_Constant = _skip_leaf
+    visit_Name = _skip_leaf
 
     def visit_Import(self, node: ast.Import) -> None:
         """
