@@ -66,13 +66,12 @@ These use decorator-based registration:
 ```python
 # Pandas functions
 @PD.register("read_excel")
-def pd_read_excel(args, keywords) -> PDFuncResult:
-    ...
+def pd_read_excel(args, keywords) -> PDFuncResult: ...
+
 
 # DataFrame methods
 @DF.register("drop")
-def df_drop(columns, args, keywords) -> DFFuncResult:
-    ...
+def df_drop(columns, args, keywords) -> DFFuncResult: ...
 ```
 
 This means:
@@ -87,9 +86,9 @@ Extractors use explicit list-based registration in `registry.py`:
 ```python
 # In registry.py
 EXTRACTORS: list[ExtractorFunc] = [
-    extract_column_ref,                # df['col'] - most common
-    extract_column_refs_from_binop,    # df['A'] + df['B']
-    extract_method_call,               # Add your extractor here
+    extract_column_ref,  # df['col'] - most common
+    extract_column_refs_from_binop,  # df['A'] + df['B']
+    extract_method_call,  # Add your extractor here
 ]
 ```
 

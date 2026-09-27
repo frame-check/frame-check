@@ -13,6 +13,7 @@ Pandas functions are registered in the `PD` class registry using the `@PD.regist
 ```python
 from .models import PD, PDFuncResult, Result, idx_or_key
 
+
 @PD.register("function_name")
 def pd_function_name(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
     # Extract relevant arguments

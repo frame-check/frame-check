@@ -13,11 +13,10 @@ DataFrame methods are registered in the `DF` class registry using the `@DF.regis
 ```python
 from .models import DF, DFFuncResult, Result, idx_or_key
 
+
 @DF.register("method_name")
 def df_method_name(
-    columns: set[str], 
-    args: list[Result], 
-    keywords: dict[str, Result]
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
     # columns = current columns on the DataFrame
     # Modify columns based on method behavior

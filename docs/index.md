@@ -37,7 +37,7 @@ When accessing DataFrame columns, you typically have to choose between:
 
 ```python
 # Defensive programming gets verbose quickly
-if 'customer_id' in df.columns and 'status' in df.columns:
+if "customer_id" in df.columns and "status" in df.columns:
     result = df[df["status"] == "active"]["customer_id"]
 else:
     raise ValueError("Missing required columns")
@@ -53,12 +53,14 @@ else:
 import pandas as pd
 
 # frame-check knows this DataFrame has columns: Name, Age, City, Salary
-df = pd.DataFrame({
-    "Name": ["Alice", "Bob"],
-    "Age": [25, 30],
-    "City": ["NYC", "LA"],
-    "Salary": [50000, 60000]
-})
+df = pd.DataFrame(
+    {
+        "Name": ["Alice", "Bob"],
+        "Age": [25, 30],
+        "City": ["NYC", "LA"],
+        "Salary": [50000, 60000],
+    }
+)
 
 # ❌ This will be caught by frame-check
 result = df["customer_id"]  # Column doesn't exist!
