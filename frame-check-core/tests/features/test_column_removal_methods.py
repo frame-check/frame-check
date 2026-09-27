@@ -327,6 +327,68 @@ print(df[['A']])
     assert "column 'X' does not exist" in fc.diagnostics[0].message
 
 
+# --- CRM-8: loc selection ---
+
+
+@pytest.mark.support(code="#CRM-8")
+def test_crm_8_loc_selection():
+    """df = df.loc[:, ['A', 'B']]"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+df = df.loc[:, ['A', 'B']]
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"A", "B"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CRM-8-1")
+def test_crm_8_1_loc_with_row_mask():
+    """Row masks keep checking the selected columns."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+pos = df.loc[df['A'] > 0, ['A', 'C']]
+everything = df.loc[df['A'] > 0, :]
+pos['B']
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["pos"].columns.keys()) == {"A", "C"}
+    assert set(fc.dfs["everything"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'B' does not exist on DataFrame 'pos'." in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CRM-8-2")
+def test_crm_8_2_loc_with_missing_label_is_reported():
+    """df.loc[:, ['A', 'X']] raises KeyError."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+print(df.loc[:, ['A', 'X']])
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df.loc[...]: column 'X' does not exist on DataFrame 'df'."
+    )
+
+
+@pytest.mark.support(code="#CRM-8-3")
+def test_crm_8_3_loc_assignment_target_is_not_validated():
+    """df.loc[:, ['X']] = 1 adds a column rather than raising."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df.loc[:, ['X']] = 1
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 0
+
+
 # --- Removing non-existent columns (raises KeyError at runtime) ---
 
 

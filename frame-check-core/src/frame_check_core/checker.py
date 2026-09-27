@@ -354,27 +354,59 @@ class Checker(ast.NodeVisitor):
                     return None
                 return f"{label}.{method_name}(...)", result[2].columns
             case ast.Subscript(value=inner, slice=ast.List(elts=elts)):
-                col_names = _constant_strs(elts)
-                if col_names is None:
-                    return None
+                # df[["A", "B"]]
                 frame = self._eval_frame(inner)
                 if frame is None:
                     return None
-                label, columns = frame
-                if missing := [col for col in col_names if col not in columns]:
-                    # Selecting unknown labels raises KeyError
-                    self.diagnostics.append(
-                        diagnostic.missing_columns(
-                            action=f"{label}[[...]]",
-                            missing_cols=missing,
-                            node=expr,
-                            df_name=label,
-                            available_cols=list(columns),
-                        )
-                    )
-                return f"{label}[[...]]", set(col_names)
+                return self._select(frame, elts, expr, "[[...]]")
+            case ast.Subscript(
+                value=ast.Attribute(value=inner, attr="loc"),
+                slice=ast.Tuple(elts=[_, col_selector]),
+            ):
+                # df.loc[rows, ["A", "B"]] / df.loc[rows, :]
+                frame = self._eval_frame(inner)
+                if frame is None:
+                    return None
+                match col_selector:
+                    case ast.List(elts=elts):
+                        return self._select(frame, elts, expr, ".loc[...]")
+                    case ast.Slice(lower=None, upper=None, step=None):
+                        return f"{frame[0]}.loc[...]", frame[1]
+                return None
             case _:
                 return None
+
+    def _select(
+        self,
+        frame: tuple[str, set[str]],
+        elts: list[ast.expr],
+        node: ast.expr,
+        suffix: str,
+    ) -> tuple[str, set[str]] | None:
+        """
+        Select the columns listed in `elts` from `frame`.
+
+        Selecting unknown labels raises KeyError, so they are reported.
+
+        Returns:
+            The selected frame, or None if the labels aren't all string
+            constants.
+        """
+        col_names = _constant_strs(elts)
+        if col_names is None:
+            return None
+        label, columns = frame
+        if missing := [col for col in col_names if col not in columns]:
+            self.diagnostics.append(
+                diagnostic.missing_columns(
+                    action=f"{label}{suffix}",
+                    missing_cols=missing,
+                    node=node,
+                    df_name=label,
+                    available_cols=list(columns),
+                )
+            )
+        return f"{label}{suffix}", set(col_names)
 
     def _bind_frame(self, target: str, value: ast.expr, columns: Iterable[str]) -> None:
         """
@@ -658,8 +690,16 @@ class Checker(ast.NodeVisitor):
         if id(node) in self._skip_subscripts:
             return self.generic_visit(node)
 
-        # Column subset: df[["A", "B"]] (validated while evaluating)
-        if isinstance(node.slice, ast.List):
+        # Column subsets: df[["A", "B"]], df.loc[:, ["A"]] (validated while
+        # evaluating). Only reads: assigning to df.loc[:, [...]] may add columns.
+        if isinstance(node.ctx, ast.Load) and (
+            isinstance(node.slice, ast.List)
+            or (
+                isinstance(node.slice, ast.Tuple)
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "loc"
+            )
+        ):
             self._eval_frame(node)
             return self.generic_visit(node)
 
