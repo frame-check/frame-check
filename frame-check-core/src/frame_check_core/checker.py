@@ -378,7 +378,10 @@ class Checker(ast.NodeVisitor):
             return self.generic_visit(node)
 
         if target_ref.df_name not in self.dfs:
-            self.diagnostics.append(diagnostic.df_is_not_declared(target_ref.node))
+            # A known variable without a tracked schema (e.g. a dict, or
+            # pd.read_csv() without usecols) has nothing to check
+            if target_ref.df_name not in self.definitions:
+                self.diagnostics.append(diagnostic.df_is_not_declared(target_ref.node))
             return self.generic_visit(node)
 
         tracker = self.dfs[target_ref.df_name]
@@ -391,11 +394,16 @@ class Checker(ast.NodeVisitor):
             self._skip_subscripts.add(id(target_ref.node))
             return self.generic_visit(node)
 
-        # Validate all referenced DataFrames exist
+        # Validate all referenced DataFrames exist; known variables without a
+        # tracked schema are skipped
+        tracked_refs = []
         for ref in read_refs:
-            if ref.df_name not in self.dfs:
+            if ref.df_name in self.dfs:
+                tracked_refs.append(ref)
+            elif ref.df_name not in self.definitions:
                 self.diagnostics.append(diagnostic.df_is_not_declared(ref.node))
                 return self.generic_visit(node)
+        read_refs = tracked_refs
 
         # RHS refs are always single-column
         read_cols = [r.col_names[0] for r in read_refs]

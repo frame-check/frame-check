@@ -275,3 +275,44 @@ df = df.assign(B=[2])
 """
     checker = Checker.check(code)
     assert checker.dfs["df"].columns["C"] == {"A"}
+
+
+# --- Untracked variables (#135) ---
+
+
+def test_assign_to_frame_without_schema_is_not_reported():
+    """A frame read without usecols has no schema; assignments aren't flagged."""
+    code = """
+import pandas as pd
+df = pd.read_csv("file.csv")
+df["a"]
+df["a"] = df["b"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 0
+
+
+def test_assign_to_dict_is_not_reported():
+    """Subscript assignment on a non-DataFrame variable isn't flagged."""
+    code = """
+config = {}
+config["x"] = 1
+config["y"] = config["x"]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 0
+
+
+def test_assign_from_untracked_variable_keeps_target_column():
+    """df['C'] = d['x'] still adds 'C' when d is not a tracked DataFrame."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+d = {"x": 1}
+df["C"] = d["x"]
+df["C"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "C"}
+    assert len(checker.diagnostics) == 0
+
