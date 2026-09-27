@@ -107,3 +107,49 @@ def test_cam_14_3_unresolvable_merge_stops_tracking(expr: str):
     fc = Checker.check(SETUP + f"out = {expr}\n")
     assert "out" not in fc.dfs
     assert fc.diagnostics == []
+
+
+JOIN_CASES = [
+    'L[["key", "a"]].join(R[["b"]])',
+    'L.join(R, lsuffix="_l", rsuffix="_r")',
+    'L.join(R, rsuffix="_r")',
+    'L.join(R, lsuffix="_l")',
+    'L.join(R, None, "left", "_l", "_r")',
+    'L.join(R.set_index("key"), on="key", rsuffix="_r")',
+    'L[["a"]].join([R[["b"]], R2[["k2"]]])',
+]
+
+
+@pytest.mark.support(code="#CAM-13")
+@pytest.mark.parametrize("expr", JOIN_CASES)
+def test_cam_13_join_matches_pandas(expr: str):
+    if "set_index" in expr:
+        # set_index isn't tracked; compare with the equivalent frame
+        expr_checked = expr.replace('R.set_index("key")', 'R[["b", "v"]]')
+    else:
+        expr_checked = expr
+    assert _checker_columns(expr_checked) == _pandas_columns(expr)
+
+
+@pytest.mark.support(code="#CAM-13-1")
+def test_cam_13_1_join_on_missing_column_is_reported():
+    fc = Checker.check(SETUP + 'out = L.join(R[["b"]], on="zz")\n')
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "L.join(): column 'zz' does not exist on DataFrame 'L'."
+    )
+
+
+@pytest.mark.support(code="#CAM-13-2")
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "L.join(R)",  # overlap without suffixes raises ValueError
+        'L.join(R["b"])',  # Series: name unknown statically
+        "L.join([R, R2])",  # overlapping frames in a list raise ValueError
+        "L.join(other)",
+    ],
+)
+def test_cam_13_2_unresolvable_join_stops_tracking(expr: str):
+    fc = Checker.check(SETUP + f"out = {expr}\n")
+    assert "out" not in fc.dfs

@@ -338,3 +338,57 @@ def df_merge(
     params = bind_positional(args[1:], keywords, MERGE_PARAMS)
     merged, error = merge_columns(columns, None, right, params)
     return columns, merged, error
+
+
+_JOIN_PARAMS = ("on", "how", "lsuffix", "rsuffix", "sort", "validate")
+
+
+@DF.register("join")
+def df_join(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    other = idx_or_key(args, keywords, idx=0, key="other")
+    params = bind_positional(args[1:], keywords, _JOIN_PARAMS)
+
+    # `on` names a column of the calling frame; unknown labels raise KeyError
+    error = None
+    if params.get("on") is not None:
+        on = _column_labels(params["on"])
+        if on is None:
+            return columns, None, None
+        if missing := on - columns:
+            error = IllegalAccess(missing=sorted(missing))
+
+    match other:
+        case DF():
+            others = [other.columns]
+        case list() if other and all(isinstance(o, DF) for o in other):
+            others = [o.columns for o in other if isinstance(o, DF)]
+        case _:
+            # Series or unresolved frames: columns unknown
+            return columns, None, error
+
+    lsuffix = params.get("lsuffix", "")
+    rsuffix = params.get("rsuffix", "")
+    if not (isinstance(lsuffix, str) and isinstance(rsuffix, str)):
+        return columns, None, error
+
+    if len(others) > 1:
+        # Joining a list of frames: any overlapping columns raise ValueError
+        seen = set(columns)
+        for other_columns in others:
+            if seen & other_columns:
+                return columns, None, error
+            seen |= other_columns
+        return columns, seen, error
+
+    right = others[0]
+    overlap = columns & right
+    if overlap and not (lsuffix or rsuffix):
+        # "columns overlap but no suffix specified" (ValueError)
+        return columns, None, error
+    joined = (columns - overlap) | (right - overlap)
+    for column in overlap:
+        joined.add(column + lsuffix)
+        joined.add(column + rsuffix)
+    return columns, joined, error
