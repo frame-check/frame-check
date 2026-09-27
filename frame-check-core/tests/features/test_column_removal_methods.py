@@ -147,3 +147,51 @@ df['C']
     assert df is not None
     assert set(df.columns.keys()) == {"C"}
     assert len(fc.diagnostics) == 0
+
+
+# --- CRM-5: pop method ---
+
+
+@pytest.mark.support(code="#CRM-5")
+def test_crm_5_pop_method():
+    """removed = df.pop('A')"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+removed = df.pop('A')
+df['B']
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"B"}
+    assert "removed" not in fc.dfs
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CRM-5-1")
+def test_crm_5_1_pop_standalone_then_read():
+    """df.pop('A') as a statement removes 'A'; reading it is reported."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df.pop('A')
+df['A']
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"B"}
+    assert len(fc.diagnostics) == 1
+
+
+@pytest.mark.support(code="#CRM-5-2")
+def test_crm_5_2_pop_rebinding_frame_name_stops_tracking():
+    """df = df.pop('A') rebinds df to a Series, so it is no longer checked."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df = df.pop('A')
+df['anything']
+"""
+    fc = Checker.check(code)
+    assert "df" not in fc.dfs
+    assert len(fc.diagnostics) == 0

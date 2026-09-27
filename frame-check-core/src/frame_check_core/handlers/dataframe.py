@@ -82,3 +82,14 @@ def df_drop(
     if inplace is True:
         return new_columns, None, None
     return columns, new_columns, None
+
+
+@DF.register("pop")
+def df_pop(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Removes the column in place and returns it as a Series
+    column = idx_or_key(args, keywords, idx=0, key="item")
+    if isinstance(column, str):
+        columns.discard(column)
+    return columns, None, None
