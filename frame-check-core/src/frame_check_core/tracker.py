@@ -151,6 +151,12 @@ class Tracker[M: Strict | Relaxed]:
         for column in columns - current.keys():
             current[column] = set()
 
+    def copy(self) -> "Tracker[M]":
+        """Return an independent copy of this tracker."""
+        tracker: Tracker[M] = Tracker(self.id_, mode=self.mode)
+        tracker.columns = {col: set(deps) for col, deps in self.columns.items()}
+        return tracker
+
     @classmethod
     def new_with_columns(cls, id_: str, columns: list[str]) -> "Tracker[Strict]":
         """
