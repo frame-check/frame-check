@@ -293,9 +293,14 @@ class Checker(ast.NodeVisitor):
             return True
 
         if returned_df is not None:
-            self.dfs[target] = Tracker.new_with_columns(
-                target, columns=list(returned_df.columns)
-            )
+            if target == source_df_name:
+                # df = df.method(...): diff the existing tracker instead of
+                # rebuilding it, which also keeps column dependencies.
+                tracker.set_columns(returned_df.columns)
+            else:
+                self.dfs[target] = Tracker.new_with_columns(
+                    target, columns=list(returned_df.columns)
+                )
         else:
             # The target now holds a non-DataFrame result (e.g. a Series or
             # None); stop tracking it so it can't produce false positives.

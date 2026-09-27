@@ -263,3 +263,15 @@ df.insert(0, 'B', [2])
 """
     checker = Checker.check(code)
     assert checker.dfs["df"].columns["C"] == {"A"}
+
+
+def test_self_assigned_method_keeps_column_dependencies():
+    """`df = df.method(...)` updates the tracker in place, keeping dependencies."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df['C'] = df['A']
+df = df.assign(B=[2])
+"""
+    checker = Checker.check(code)
+    assert checker.dfs["df"].columns["C"] == {"A"}
