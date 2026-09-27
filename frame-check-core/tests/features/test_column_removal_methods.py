@@ -244,6 +244,89 @@ df['anything']
     assert len(fc.diagnostics) == 0
 
 
+# --- CRM-7: Select subset ---
+
+
+@pytest.mark.support(code="#CRM-7")
+def test_crm_7_select_subset():
+    """df = df[['A', 'B']]"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+df = df[['A', 'B']]
+df['A']
+df['C']
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"A", "B"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'C' does not exist on DataFrame 'df'." in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CRM-7-1")
+def test_crm_7_1_subset_into_new_frame_keeps_source():
+    """sub = df[['A']] leaves df untouched and keeps dependencies."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df['C'] = df['A']
+sub = df[['A']]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert fc.dfs["df"].columns["C"] == {"A"}
+    assert set(fc.dfs["sub"].columns.keys()) == {"A"}
+
+
+@pytest.mark.support(code="#CRM-7-2")
+def test_crm_7_2_subset_with_missing_column_is_reported_once():
+    """Selecting an unknown label raises KeyError; it's reported once."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df = df[['A', 'X', 'Y']]
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df[[...]]: columns 'X', 'Y' do not exist on DataFrame 'df'."
+    )
+
+
+@pytest.mark.support(code="#CRM-7-3")
+def test_crm_7_3_subset_in_chain():
+    """Subsets chain with methods in both directions."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2], 'C': [3]})
+out = df[['A', 'B']].assign(D=lambda x: x['C'])
+out2 = df.assign(D=1)[['A', 'D']]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["out"].columns.keys()) == {"A", "B", "D"}
+    assert set(fc.dfs["out2"].columns.keys()) == {"A", "D"}
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df[[...]].assign(): column 'C' does not exist"
+    )
+
+
+@pytest.mark.support(code="#CRM-7-4")
+def test_crm_7_4_multi_column_read_is_validated():
+    """df[['A', 'X']] used as an expression is validated."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+print(df[['A', 'X']])
+print(df[['A']])
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert "column 'X' does not exist" in fc.diagnostics[0].message
+
+
 # --- Removing non-existent columns (raises KeyError at runtime) ---
 
 
