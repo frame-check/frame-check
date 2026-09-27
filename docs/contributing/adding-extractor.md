@@ -18,21 +18,22 @@ Add a new extractor when you want to track column references in a pattern that i
 import ast
 from frame_check_core.refs import ColumnRef
 
+
 def extract_my_pattern(node: ast.expr) -> list[ColumnRef] | None:
     """
     Extract column references from my pattern.
-    
+
     Returns:
         List of ColumnRef objects if pattern matches, None otherwise.
     """
     # 1. Check if node matches your pattern
     if not isinstance(node, ast.SomeType):
         return None
-    
+
     # 2. Extract column references
     refs = []
     # ... extraction logic ...
-    
+
     # 3. Return refs or None
     return refs if refs else None
 ```
@@ -42,8 +43,7 @@ def extract_my_pattern(node: ast.expr) -> list[ColumnRef] | None:
 Every extractor must have this signature:
 
 ```python
-def my_extractor(node: ast.expr) -> list[ColumnRef] | None:
-    ...
+def my_extractor(node: ast.expr) -> list[ColumnRef] | None: ...
 ```
 
 ### Return Type
@@ -56,9 +56,9 @@ def my_extractor(node: ast.expr) -> list[ColumnRef] | None:
 ```python
 @dataclass(slots=True)
 class ColumnRef:
-    node: ast.Subscript    # Original AST node for location tracking
-    df_name: str           # DataFrame variable name (e.g., 'df')
-    col_names: list[str]   # Column names being accessed (e.g., ['A'])
+    node: ast.Subscript  # Original AST node for location tracking
+    df_name: str  # DataFrame variable name (e.g., 'df')
+    col_names: list[str]  # Column names being accessed (e.g., ['A'])
 ```
 
 ## Example: Existing `extract_column_ref`
@@ -207,9 +207,9 @@ from .method import extract_column_refs_from_method  # ADD THIS
 
 # Extractors to use, in priority order (earlier = tried first)
 EXTRACTORS: list[ExtractorFunc] = [
-    extract_column_ref,                # df['col'] and df[['a', 'b']] - most common
-    extract_column_refs_from_binop,    # df['A'] + df['B'] - binary operations
-    extract_column_refs_from_method,   # df['A'].fillna(df['B']) - method calls
+    extract_column_ref,  # df['col'] and df[['a', 'b']] - most common
+    extract_column_refs_from_binop,  # df['A'] + df['B'] - binary operations
+    extract_column_refs_from_method,  # df['A'].fillna(df['B']) - method calls
 ]
 ```
 

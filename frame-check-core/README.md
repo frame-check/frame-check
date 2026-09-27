@@ -21,7 +21,9 @@ The Frame Check Core leverages Python's structural pattern matching to efficient
 ```python
 # Example of pattern matching in FrameChecker
 match node:
-    case ast.Call(func=ast.Attribute(value=ast.Name(), attr=attr), args=args, keywords=keywords):
+    case ast.Call(
+        func=ast.Attribute(value=ast.Name(), attr=attr), args=args, keywords=keywords
+    ):
         if method := PD.get_method(attr):
             created, error = method(args, keywords, self.definitions)
             # Further processing...

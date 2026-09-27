@@ -1,7 +1,7 @@
+import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-import tomllib
 
 from . import paths
 

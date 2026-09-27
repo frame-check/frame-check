@@ -1,5 +1,6 @@
 import ast
-from typing import Callable, Iterable, Union
+from collections.abc import Callable, Iterable
+from typing import ClassVar, Union
 
 from ..diagnostic import IllegalAccess
 
@@ -104,13 +105,7 @@ PDMethodResult = tuple["DF | None", IllegalAccess | None]
 
 
 class PD:
-    instance = None
-    func_registry: dict[str, PDFunc] = {}
-
-    def __new__(cls) -> "PD":
-        if cls.instance is None:
-            cls.instance = super().__new__(cls)
-        return cls.instance
+    func_registry: ClassVar[dict[str, PDFunc]] = {}
 
     @classmethod
     def get_method(cls, method_name: str) -> "PDMethod | None":
@@ -158,7 +153,7 @@ DFMethodResult = tuple["DF", "DF | None", IllegalAccess | None]
 class DF:
     """This represents a state of a DataFrame. It should be considered immutable."""
 
-    func_registry: dict[str, DFFunc] = {}
+    func_registry: ClassVar[dict[str, DFFunc]] = {}
 
     def __init__(self, columns: Iterable[str]):
         self.columns: set[str] = set(columns)

@@ -116,15 +116,13 @@ frame-check works by:
 **Pandas Functions** (`handlers/pandas.py`):
 ```python
 @PD.register("read_excel")
-def pd_read_excel(args, keywords) -> PDFuncResult:
-    ...
+def pd_read_excel(args, keywords) -> PDFuncResult: ...
 ```
 
 **DataFrame Methods** (`handlers/dataframe.py`):
 ```python
 @DF.register("drop")
-def df_drop(columns, args, keywords) -> DFFuncResult:
-    ...
+def df_drop(columns, args, keywords) -> DFFuncResult: ...
 ```
 
 **Extractors** (`extractors/registry.py`):
@@ -144,7 +142,9 @@ Location: `frame-check-core/src/frame_check_core/handlers/pandas.py`
 
 ```python
 @PD.register("read_excel")
-def pd_read_excel(args: list[ast.expr], keywords: list[tuple[str, ast.expr]]) -> PDFuncResult:
+def pd_read_excel(
+    args: list[ast.expr], keywords: list[tuple[str, ast.expr]]
+) -> PDFuncResult:
     # Return columns that this function creates
     return PDFuncResult(columns={"col1", "col2"})
 ```
@@ -155,7 +155,9 @@ Location: `frame-check-core/src/frame_check_core/handlers/dataframe.py`
 
 ```python
 @DF.register("drop")
-def df_drop(columns: ColumnRef, args: list[ast.expr], keywords: list[tuple[str, ast.expr]]) -> DFFuncResult:
+def df_drop(
+    columns: ColumnRef, args: list[ast.expr], keywords: list[tuple[str, ast.expr]]
+) -> DFFuncResult:
     # Return columns to remove
     return DFFuncResult(removed={"col1"})
 ```

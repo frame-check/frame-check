@@ -15,12 +15,12 @@ frame-check = "frame_check_core:main"
 
 
 [build-system]
-requires = ["uv_build>=0.8.12,<0.9.0"]
+requires = ["uv_build>=0.12.19,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.4.2",
+    "pytest>=9.1.1",
 ]
 
 [tool.pyright]
