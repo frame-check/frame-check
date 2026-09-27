@@ -47,7 +47,7 @@ title = "From JSON"
 code = """pd.read_json('file.json')"""
 description = "Loads data from a JSON file into a DataFrame."
 tested = true
-supported = false
+supported = true
 
 [dataframe_creation_methods.dcms_9]
 title = "From Excel"
@@ -161,7 +161,7 @@ title = "insert method"
 code = "df.insert(0, \"A\", [1, 2, 3])"
 description = "Inserts a column at a specific position in the DataFrame. Modifies in place."
 tested = true
-supported = false
+supported = true
 
 [column_assignment_methods.cam_10]
 title = "setitem with list"
@@ -281,36 +281,36 @@ supported = false
 title = "del statement"
 code = """del df['A']"""
 description = "In-place removal of a column using the Python del statement."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_2]
 title = "drop method"
 code = """df = df.drop('A', axis=1)"""
 description = "Returns a new DataFrame with the specified column removed."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_3]
 title = "drop with columns"
 code = """df = df.drop(columns=['A', 'B'])"""
 description = "More explicit way to drop columns using the columns parameter."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_4]
 title = "drop multiple"
 code = """df = df.drop(['A','B'], axis=1)"""
 description = "Removes multiple columns at once using a list of column names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_5]
 title = "pop method"
 code = """removed = df.pop('A')"""
 description = "Removes a column from the DataFrame and returns it as a Series."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_6]
 title = "Assign None"
@@ -381,8 +381,8 @@ supported = false
 title = "Rename operations"
 code = """df = df.rename(columns={'old': 'new'})"""
 description = "Changes column names while preserving their data and position."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_3]
 title = "Set operations"
