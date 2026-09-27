@@ -109,19 +109,39 @@ df['col2']
 
 @pytest.mark.support(code="#EC-2-6")
 def test_ec_2_6_rename_with_opaque_mapping_no_false_positives():
-    """When the mapping can't be resolved statically, columns are left untouched
-    and access to existing columns must still pass."""
+    """When the mapping can't be resolved statically, the renamed columns are
+    unknown, so the result is no longer tracked and nothing is reported."""
     code = """
 import pandas as pd
 import json
 df = pd.DataFrame({'col1': [1, 2], 'col2': [3, 4]})
 mapping = json.loads('{"col1": "cola"}')
 df = df.rename(columns=mapping)
-df['col1']
+df['cola']
 df['col2']
 """
     fc = Checker.check(code)
-    df = fc.dfs.get("df")
-    assert df is not None
-    assert set(df.columns.keys()) == {"col1", "col2"}
+    assert "df" not in fc.dfs
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#EC-2-7")
+@pytest.mark.parametrize(
+    "call",
+    [
+        "df = df.rename(columns=str.upper)",
+        "df = df.rename(str.upper, axis=1)",
+        "df.rename(columns=str.upper, inplace=True)",
+    ],
+)
+def test_ec_2_7_rename_with_callable_stops_tracking(call: str):
+    """A callable renames every column; reading the new names isn't flagged."""
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{'a': [1]}})
+{call}
+df['A']
+"""
+    fc = Checker.check(code)
+    assert "df" not in fc.dfs
     assert len(fc.diagnostics) == 0

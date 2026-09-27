@@ -48,21 +48,24 @@ def df_insert(
 def df_rename(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    col_mapping = idx_or_key(args, keywords, key="columns")
-
-    # Mapper+axis form: df.rename({"a": "b"}, axis=1) / axis="columns"
-    if not isinstance(col_mapping, dict):
-        axis = idx_or_key(args, keywords, idx=1, key="axis")
-        if axis == 1 or axis == "columns":
-            col_mapping = idx_or_key(args, keywords, idx=0, key="mapper")
-
     inplace = idx_or_key(args, keywords, key="inplace")
 
+    if "columns" in keywords:
+        col_mapping = keywords["columns"]
+    else:
+        # Mapper+axis form: df.rename({"a": "b"}, axis=1) / axis="columns"
+        axis = idx_or_key(args, keywords, idx=1, key="axis")
+        if not (axis == 1 or axis == "columns"):
+            # Only the index is renamed
+            return columns, None if inplace is True else columns, None
+        col_mapping = idx_or_key(args, keywords, idx=0, key="mapper")
+
     if not isinstance(col_mapping, dict):
-        # Can't determine rename statically — leave columns untouched
+        # A callable (str.upper) or an unresolved mapping renames columns in
+        # ways we can't know: the result is unknown
         if inplace is True:
-            return columns, None, None
-        return columns, columns, None
+            return None, None, None
+        return columns, None, None
 
     new_columns = set()
     for col in columns:

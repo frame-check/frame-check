@@ -207,9 +207,11 @@ class PDMethod:
         return DF(returned) if returned is not None else None, error
 
 
-DFFuncResult = tuple[set[str], set[str] | None, IllegalAccess | None]
+# (updated, returned, error); updated is None when the call changes the frame
+# in place in a way that can't be determined statically
+DFFuncResult = tuple[set[str] | None, set[str] | None, IllegalAccess | None]
 DFFunc = Callable[[set[str], list[Result], dict[str, Result]], DFFuncResult]
-DFMethodResult = tuple["DF", "DF | None", IllegalAccess | None]
+DFMethodResult = tuple["DF | None", "DF | None", IllegalAccess | None]
 
 
 class DF:
@@ -258,4 +260,8 @@ class DFMethod:
             definitions = {}
         argsv, keywordsv = parse_args(args, keywords, definitions, frames)
         updated, returned, error = self.func(self.df.columns.copy(), argsv, keywordsv)
-        return DF(updated), DF(returned) if returned is not None else None, error
+        return (
+            DF(updated) if updated is not None else None,
+            DF(returned) if returned is not None else None,
+            error,
+        )

@@ -548,7 +548,7 @@ class Checker(ast.NodeVisitor):
 
     def _call_method(
         self, label: str, columns: Iterable[str], call: ast.Call, method_name: str
-    ) -> tuple[DF, DF, DF | None] | None:
+    ) -> tuple[DF, DF | None, DF | None] | None:
         """
         Run the registered handler for `method_name` on a frame's columns.
 
@@ -761,8 +761,12 @@ class Checker(ast.NodeVisitor):
             return False
         original_df, updated_df, returned_df = result
 
-        if tracker is not None and updated_df.columns != original_df.columns:
-            tracker.set_columns(updated_df.columns)
+        if tracker is not None:
+            if updated_df is None:
+                # Changed in place in a way we can't follow: stop tracking
+                del self.dfs[label]
+            elif updated_df.columns != original_df.columns:
+                tracker.set_columns(updated_df.columns)
 
         if target is None:
             return True
