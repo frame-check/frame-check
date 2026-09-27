@@ -316,3 +316,15 @@ df["C"]
     assert set(checker.dfs["df"].columns) == {"A", "C"}
     assert len(checker.diagnostics) == 0
 
+
+def test_frame_init_dict_with_variable_key():
+    """Dict keys that are variables resolve to their values (#37)."""
+    code = """
+import pandas as pd
+col1 = "a"
+df = pd.DataFrame({col1: [1, 2, 3], "b": [4, 5, 6]})
+df["a"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a", "b"}
+    assert len(checker.diagnostics) == 0
