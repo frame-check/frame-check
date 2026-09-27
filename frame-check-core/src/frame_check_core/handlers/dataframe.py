@@ -1,5 +1,5 @@
 from ..diagnostic import IllegalAccess
-from .models import DF, DFFuncResult, Result, idx_or_key
+from .models import DF, ColumnLambda, DFFuncResult, Result, idx_or_key
 
 
 def _column_labels(value: Result) -> set[str] | None:
@@ -17,8 +17,21 @@ def _column_labels(value: Result) -> set[str] | None:
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    returned = columns | set(keywords.keys())
-    return columns, returned, None
+    # Keywords are assigned in order; a callable sees the columns created by
+    # the keywords before it, so validate lambda reads against that state.
+    returned = set(columns)
+    missing: list[str] = []
+    for name, value in keywords.items():
+        if isinstance(value, ColumnLambda):
+            missing.extend(
+                col
+                for col in value.columns
+                if col not in returned and col not in missing
+            )
+        returned.add(name)
+
+    error = IllegalAccess(missing=missing) if missing else None
+    return columns, returned, error
 
 
 @DF.register("insert")

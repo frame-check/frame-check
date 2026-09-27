@@ -150,6 +150,80 @@ df2 = df.sort_values("A").assign(B=1)
     assert len(fc.diagnostics) == 0
 
 
+# --- CAM-8: Multiple assign ---
+
+
+@pytest.mark.support(code="#CAM-8")
+def test_cam_8_multiple_assign():
+    """df = df.assign(B=1, C=2)"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(B=1, C=2)
+df["B"]
+df["C"]
+"""
+    fc = Checker.check(code)
+    df = fc.dfs.get("df")
+    assert df is not None
+    assert set(df.columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-8-1")
+def test_cam_8_1_lambda_uses_columns_from_same_assign():
+    """Callables see the columns created by earlier keywords."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(B=1, C=2, D=lambda x: x["A"] + x["B"] + x["C"])
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C", "D"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-8-2")
+def test_cam_8_2_lambda_uses_later_column_is_reported():
+    """A callable can't read a column created by a later keyword."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(D=lambda x: x["B"] * 2, B=1)
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].message.startswith(
+        "df.assign(): column 'B' does not exist on DataFrame 'df'."
+    )
+
+
+@pytest.mark.support(code="#CAM-8-3")
+def test_cam_8_3_lambda_with_typo_suggests_column():
+    """A typo inside an assign lambda gets a suggestion."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"price": [1], "quantity": [2]})
+df = df.assign(total=lambda d: d["price"] * d["quantiy"])
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert fc.diagnostics[0].name_suggestion == "quantity"
+
+
+@pytest.mark.support(code="#CAM-8-4")
+def test_cam_8_4_lambda_across_chained_assign():
+    """df.assign(B=1).assign(C=lambda x: x['B'] * 2)"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(B=1).assign(C=lambda x: x["B"] * 2)
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 0
+
+
 # --- CAM-9: insert method ---
 
 
