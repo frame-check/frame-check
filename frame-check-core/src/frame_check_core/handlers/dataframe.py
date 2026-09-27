@@ -1,5 +1,5 @@
 from ..diagnostic import IllegalAccess
-from .models import DF, DFFuncResult, Result, idx_or_key
+from .models import DF, ColumnLambda, DFFuncResult, Result, Unknown, idx_or_key
 
 
 def _column_labels(value: Result) -> set[str] | None:
@@ -17,8 +17,21 @@ def _column_labels(value: Result) -> set[str] | None:
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    returned = columns | set(keywords.keys())
-    return columns, returned, None
+    # Keywords are assigned in order; a callable sees the columns created by
+    # the keywords before it, so validate lambda reads against that state.
+    returned = set(columns)
+    missing: list[str] = []
+    for name, value in keywords.items():
+        if isinstance(value, ColumnLambda):
+            missing.extend(
+                col
+                for col in value.columns
+                if col not in returned and col not in missing
+            )
+        returned.add(name)
+
+    error = IllegalAccess(missing=missing) if missing else None
+    return columns, returned, error
 
 
 @DF.register("insert")
@@ -103,3 +116,95 @@ def df_pop(
         return columns, None, IllegalAccess(missing=[column])
     columns.remove(column)
     return columns, None, None
+
+
+# Methods that return a frame with exactly the same columns (row selection,
+# reordering, value transforms).
+@DF.register("abs")
+@DF.register("bfill")
+@DF.register("clip")
+@DF.register("copy")
+@DF.register("ffill")
+@DF.register("fillna")
+@DF.register("head")
+@DF.register("query")
+@DF.register("replace")
+@DF.register("round")
+@DF.register("sample")
+@DF.register("sort_index")
+@DF.register("tail")
+def df_same_columns(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    return _same_columns(columns, args, keywords)
+
+
+def _same_columns(
+    columns: set[str],
+    args: list[Result],
+    keywords: dict[str, Result],
+    required: Result = Unknown,
+) -> DFFuncResult:
+    """Keep all columns; report `required` labels that don't exist (KeyError)."""
+    error = None
+    labels = _column_labels(required)
+    if labels and (missing := labels - columns):
+        error = IllegalAccess(missing=sorted(missing))
+
+    if idx_or_key(args, keywords, key="inplace") is True:
+        return columns, None, error
+    return columns, columns, error
+
+
+# The column-preserving methods below raise KeyError for unknown labels in
+# their column arguments (unlike e.g. fillna/replace/round with a dict).
+
+
+@DF.register("sort_values")
+def df_sort_values(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    axis = idx_or_key(args, keywords, key="axis")
+    if axis == 1 or axis == "columns":
+        # Sorting columns by row labels
+        return _same_columns(columns, args, keywords)
+    by = idx_or_key(args, keywords, idx=0, key="by")
+    return _same_columns(columns, args, keywords, required=by)
+
+
+@DF.register("drop_duplicates")
+def df_drop_duplicates(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    subset = idx_or_key(args, keywords, idx=0, key="subset")
+    return _same_columns(columns, args, keywords, required=subset)
+
+
+@DF.register("dropna")
+def df_dropna(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Rows are dropped by default; dropna(axis=1) may remove columns, but
+    # keeping the full set can't produce false positives.
+    subset = idx_or_key(args, keywords, key="subset")
+    return _same_columns(columns, args, keywords, required=subset)
+
+
+@DF.register("nlargest")
+@DF.register("nsmallest")
+def df_nlargest_nsmallest(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    required = idx_or_key(args, keywords, idx=1, key="columns")
+    return _same_columns(columns, args, keywords, required=required)
+
+
+@DF.register("astype")
+def df_astype(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    dtype = idx_or_key(args, keywords, idx=0, key="dtype")
+    if not isinstance(dtype, dict):
+        return _same_columns(columns, args, keywords)
+    required = [k for k in dtype if isinstance(k, str)]
+    return _same_columns(columns, args, keywords, required=required)

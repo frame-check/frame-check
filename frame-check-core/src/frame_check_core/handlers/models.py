@@ -1,5 +1,6 @@
 import ast
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import ClassVar, Union
 
 from ..diagnostic import IllegalAccess
@@ -10,7 +11,31 @@ class _Unknown:
 
 
 Unknown = _Unknown()  # A value that is either not supported or not provided.
-Result = Union[str, bool, int, dict, list, "PD", "PDMethod", "DF", "DFMethod", _Unknown]
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnLambda:
+    """A single-argument lambda, e.g. `lambda x: x["A"] + x["B"]`.
+
+    `columns` are the labels the lambda reads from its argument, in order.
+    """
+
+    columns: tuple[str, ...]
+
+
+Result = Union[
+    str,
+    bool,
+    int,
+    dict,
+    list,
+    ColumnLambda,
+    "PD",
+    "PDMethod",
+    "DF",
+    "DFMethod",
+    _Unknown,
+]
 
 _ASSIGNING_ATTR = "_frame_checker_assigning"
 _RESULT_ATTR = "_frame_checker_result_columns"
@@ -57,8 +82,28 @@ def get_value(node: ast.AST, definitions: dict[str, Result]) -> Result:
                 result_dict[key] = value
             return result_dict
 
+        case ast.Lambda(args=ast.arguments(args=[ast.arg(arg=param)]), body=body) if (
+            not node.args.posonlyargs
+            and not node.args.kwonlyargs
+            and node.args.vararg is None
+            and node.args.kwarg is None
+        ):
+            return ColumnLambda(columns=_lambda_columns(body, param))
+
         case _:
             return Unknown
+
+
+def _lambda_columns(body: ast.expr, param: str) -> tuple[str, ...]:
+    """Collect the column labels read as `param["col"]` inside a lambda body."""
+    columns: list[str] = []
+    for child in ast.walk(body):
+        match child:
+            case ast.Subscript(
+                value=ast.Name(id=name), slice=ast.Constant(value=str(column))
+            ) if name == param and column not in columns:
+                columns.append(column)
+    return tuple(columns)
 
 
 def get_result(node: ast.AST, definitions: dict[str, Result]) -> Result:

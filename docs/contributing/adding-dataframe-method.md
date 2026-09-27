@@ -32,7 +32,7 @@ DFFuncResult = tuple[set[str], set[str] | None, IllegalAccess | None]
 
 - First element: Updated columns on the original DataFrame (for in-place operations)
 - Second element: Columns on the returned DataFrame, or `None` if method doesn't return a new DataFrame
-- Third element: Error if the call is invalid, or `None`
+- Third element: Error if the call is invalid, or `None` (see [Reporting errors](#reporting-errors))
 
 ### Understanding the Return Values
 
@@ -49,10 +49,55 @@ DFFuncResult = tuple[set[str], set[str] | None, IllegalAccess | None]
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    # assign() returns a NEW DataFrame with additional columns from kwargs
-    returned = columns | set(keywords.keys())
-    return columns, returned, None
+    # Keywords are assigned in order; a callable sees the columns created by
+    # the keywords before it, so validate lambda reads against that state.
+    returned = set(columns)
+    missing: list[str] = []
+    for name, value in keywords.items():
+        if isinstance(value, ColumnLambda):
+            missing.extend(
+                col
+                for col in value.columns
+                if col not in returned and col not in missing
+            )
+        returned.add(name)
+
+    error = IllegalAccess(missing=missing) if missing else None
+    return columns, returned, error
 ```
+
+## Reporting errors
+
+If the call raises `KeyError` at runtime for unknown columns, return
+`IllegalAccess(missing=[...])` as the third element. The checker turns it into a
+diagnostic with suggestions, for example
+`df.drop(): column 'X' does not exist on DataFrame 'df'.`
+
+```python
+from ..diagnostic import IllegalAccess
+
+if missing := labels - columns:
+    return columns, columns - labels, IllegalAccess(missing=sorted(missing))
+```
+
+Only report what pandas really rejects. For example, `fillna({"X": 0})` silently
+ignores unknown keys, so it must not be reported. When unsure, check the behavior
+against pandas.
+
+## Callables in arguments
+
+A single-argument lambda is resolved to a `ColumnLambda` whose `columns` lists
+the labels it reads from its argument (`lambda x: x["A"] + x["B"]` gives
+`("A", "B")`). Use it to validate callables such as those passed to `assign()`.
+
+## Where handlers run
+
+You don't need to handle call sites yourself. The checker runs a registered
+handler wherever the method is called on a tracked frame:
+
+- as an assignment (`df2 = df.method(...)`) or a statement (`df.method(..., inplace=True)`)
+- in method chains (`df.method(...).assign(...)`) and column selections (`df[["A"]].method(...)`)
+- in any expression (`print(df.method(...))`)
 
 ## Example: Existing `df.insert()`
 
@@ -211,16 +256,12 @@ def df_rename(
         return columns, new_columns, None
 ```
 
-### Adding `df.copy()`
+### Methods that keep all columns
 
-```python
-@DF.register("copy")
-def df_copy(
-    columns: set[str], args: list[Result], keywords: dict[str, Result]
-) -> DFFuncResult:
-    # copy() returns a new DataFrame with identical columns
-    return columns, columns.copy(), None
-```
+Methods such as `copy()`, `head()` or `sort_values()` return a frame with the same
+columns. Add them to the decorators on `df_same_columns`, or use
+`_same_columns(..., required=...)` when an argument names columns that must
+exist (like `sort_values(by=...)`).
 
 ### Adding `df.reset_index()`
 
@@ -336,6 +377,10 @@ def df_some_method(columns: set[str], args, keywords) -> DFFuncResult:
    
    # Pattern 2: Reassign to same variable
    df = df.drop(columns="A")
+
+   # Pattern 3: Chained and in-place calls
+   df2 = df.assign(B=1).drop(columns="A")
+   df.drop(columns="A", inplace=True)
    ```
 
 ## Common Patterns
