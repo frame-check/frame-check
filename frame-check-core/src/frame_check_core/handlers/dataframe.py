@@ -116,3 +116,33 @@ def df_pop(
         return columns, None, IllegalAccess(missing=[column])
     columns.remove(column)
     return columns, None, None
+
+
+# Methods that return a frame with exactly the same columns (row selection,
+# reordering, value transforms). Row-wise dropna(axis=1) may remove columns,
+# but keeping the full set can't produce false positives.
+@DF.register("abs")
+@DF.register("astype")
+@DF.register("bfill")
+@DF.register("clip")
+@DF.register("copy")
+@DF.register("drop_duplicates")
+@DF.register("dropna")
+@DF.register("ffill")
+@DF.register("fillna")
+@DF.register("head")
+@DF.register("nlargest")
+@DF.register("nsmallest")
+@DF.register("query")
+@DF.register("replace")
+@DF.register("round")
+@DF.register("sample")
+@DF.register("sort_index")
+@DF.register("sort_values")
+@DF.register("tail")
+def df_same_columns(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    if idx_or_key(args, keywords, key="inplace") is True:
+        return columns, None, None
+    return columns, columns, None
