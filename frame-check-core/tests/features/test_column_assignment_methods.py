@@ -22,6 +22,26 @@ df["c"]
     assert len(fc.diagnostics) == 0
 
 
+# --- CAM-2: Attribute assignment ---
+
+
+@pytest.mark.support(code="#CAM-2")
+def test_cam_2_attribute_assignment_does_not_create_columns():
+    """df.new = value sets a plain attribute (pandas warns), not a column."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df.a = [2]
+df.new = [5]
+df["a"]
+df["new"]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"a"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'new' does not exist" in fc.diagnostics[0].message
+
+
 # --- CAM-7: assign method ---
 
 

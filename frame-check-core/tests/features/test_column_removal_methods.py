@@ -244,6 +244,23 @@ df['anything']
     assert len(fc.diagnostics) == 0
 
 
+# --- CRM-6: Assign None ---
+
+
+@pytest.mark.support(code="#CRM-6")
+def test_crm_6_assign_none_keeps_the_column():
+    """df.assign(col=None) sets every value to None; the column stays."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'col': [1], 'B': [2]})
+df = df.assign(col=None)
+df['col']
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"col", "B"}
+    assert len(fc.diagnostics) == 0
+
+
 # --- CRM-7: Select subset ---
 
 
