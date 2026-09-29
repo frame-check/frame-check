@@ -171,6 +171,15 @@ def _constant_strs(elts: list[ast.expr]) -> list[str] | None:
     return values or None
 
 
+def _is_frame_root(
+    name: str | None,
+    dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]],
+    pandas: set[str],
+) -> bool:
+    """Whether a chain starting at `name` can evaluate to a frame."""
+    return name is not None and (name in dfs or name in pandas)
+
+
 def _root_name(expr: ast.expr) -> str | None:
     """Return the name a frame expression starts from (`df` in `df[...].a()`)."""
     while True:
@@ -722,7 +731,10 @@ class Checker(ast.NodeVisitor):
         if (
             isinstance(node.func, ast.Attribute)
             and id(node) not in self._evaluated_calls
+            and _is_frame_root(_root_name(node), self.dfs, self.pandas_aliases)
         ):
+            # Only chains rooted at a tracked frame or pandas can produce a
+            # frame; skipping the rest is cheap (np.where(...), s.str.lower())
             self._eval_frame(node)
         self.generic_visit(node)
 
