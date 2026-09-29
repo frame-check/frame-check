@@ -68,7 +68,94 @@ def format_diagnostic(
     return f"{file_path}:{loc.row}:{loc.col}: {diag.message}"
 
 
-_generic_visit = ast.NodeVisitor.generic_visit
+def _parameter_names(args: ast.arguments) -> set[str]:
+    """Return the names of all parameters in a function signature."""
+    names = {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+    if args.vararg is not None:
+        names.add(args.vararg.arg)
+    if args.kwarg is not None:
+        names.add(args.kwarg.arg)
+    return names
+
+
+def _function_locals(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[set[str], set[str]]:
+    """
+    Return the names local to a function, and those declared global/nonlocal.
+
+    Only statements can bind names in a function body (walrus targets
+    aside), so walking statement blocks is enough and much cheaper than
+    visiting every expression node.
+    """
+    local_names = _parameter_names(node.args)
+    declared: set[str] = set()
+    _collect_bound_names(node.body, local_names, declared)
+    return local_names - declared, declared
+
+
+def _collect_bound_names(
+    stmts: list[ast.stmt], names: set[str], declared: set[str]
+) -> None:
+    """Add the names bound by `stmts` (and nested blocks) to `names`."""
+    for stmt in stmts:
+        match stmt:
+            case ast.Assign(targets=targets):
+                for target in targets:
+                    _collect_target_names(target, names)
+            case ast.AugAssign(target=target) | ast.AnnAssign(target=target):
+                _collect_target_names(target, names)
+            case ast.For(target=target) | ast.AsyncFor(target=target):
+                _collect_target_names(target, names)
+                _collect_bound_names(stmt.body, names, declared)
+                _collect_bound_names(stmt.orelse, names, declared)
+            case ast.With(items=items) | ast.AsyncWith(items=items):
+                for item in items:
+                    if item.optional_vars is not None:
+                        _collect_target_names(item.optional_vars, names)
+                _collect_bound_names(stmt.body, names, declared)
+            case ast.If(body=body, orelse=orelse) | ast.While(body=body, orelse=orelse):
+                _collect_bound_names(body, names, declared)
+                _collect_bound_names(orelse, names, declared)
+            case ast.Try() | ast.TryStar():
+                _collect_bound_names(stmt.body, names, declared)
+                for handler in stmt.handlers:
+                    if handler.name is not None:
+                        names.add(handler.name)
+                    _collect_bound_names(handler.body, names, declared)
+                _collect_bound_names(stmt.orelse, names, declared)
+                _collect_bound_names(stmt.finalbody, names, declared)
+            case ast.Match(cases=cases):
+                for case in cases:
+                    names.update(
+                        child.name
+                        for child in ast.walk(case.pattern)
+                        if isinstance(child, (ast.MatchAs, ast.MatchStar))
+                        and child.name is not None
+                    )
+                    _collect_bound_names(case.body, names, declared)
+            case (
+                ast.FunctionDef(name=name)
+                | ast.AsyncFunctionDef(name=name)
+                | ast.ClassDef(name=name)
+            ):
+                names.add(name)
+            case ast.Import(names=aliases) | ast.ImportFrom(names=aliases):
+                names.update(a.asname or a.name.partition(".")[0] for a in aliases)
+            case ast.Global(names=global_names) | ast.Nonlocal(names=global_names):
+                declared.update(global_names)
+
+
+def _collect_target_names(target: ast.expr, names: set[str]) -> None:
+    """Add the names bound by an assignment target (`a`, `a, *b`, ...)."""
+    match target:
+        case ast.Name(id=name):
+            names.add(name)
+        case ast.Tuple(elts=elts) | ast.List(elts=elts):
+            for elt in elts:
+                _collect_target_names(elt, names)
+        case ast.Starred(value=value):
+            _collect_target_names(value, names)
 
 
 def _constant_strs(elts: list[ast.expr]) -> list[str] | None:
@@ -79,6 +166,15 @@ def _constant_strs(elts: list[ast.expr]) -> list[str] | None:
             return None
         values.append(elt.value)
     return values or None
+
+
+def _is_frame_root(
+    name: str | None,
+    dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]],
+    pandas: set[str],
+) -> bool:
+    """Whether a chain starting at `name` can evaluate to a frame."""
+    return name is not None and (name in dfs or name in pandas)
 
 
 def _root_name(expr: ast.expr) -> str | None:
@@ -135,10 +231,16 @@ class Checker(ast.NodeVisitor):
         # _eval_frame results by node id, so each expression's diagnostics
         # are reported once however many code paths evaluate it
         self._frames: dict[int, tuple[str, set[str]] | None] = {}
+        # Method calls already run through a handler (see visit_Call)
+        self._evaluated_calls: set[int] = set()
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
         self.definitions: dict[str, Result] = {}
+        # Every name bound anywhere (loop targets, parameters, imports, ...)
+        self._bound: set[str] = set()
+        # Enclosing-scope frames whose diagnostics are suppressed (see _report)
+        self._quiet: set[str] = set()
 
     @classmethod
     def check(cls, code: str | Path | ast.Module) -> Self:
@@ -184,17 +286,158 @@ class Checker(ast.NodeVisitor):
         try:
             visitor = self._dispatch[cls]
         except KeyError:
-            visitor = getattr(type(self), "visit_" + cls.__name__, _generic_visit)
+            visitor = getattr(
+                type(self), "visit_" + cls.__name__, type(self).generic_visit
+            )
             self._dispatch[cls] = visitor
         visitor(self, node)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        """
+        Visit all child nodes.
+
+        Same as `ast.NodeVisitor.generic_visit`, without its `iter_fields`
+        generator, which is the single largest cost of a check.
+        """
+        visit = self.visit
+        for field in node._fields:
+            value = getattr(node, field, None)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        visit(item)
+            elif isinstance(value, ast.AST):
+                visit(value)
 
     def _skip_leaf(self, node: ast.AST) -> None:
         """Leaf nodes can't contain column references, so don't descend."""
 
     # `ast.NodeVisitor.visit_Constant` runs deprecation shims on every
-    # constant, and `Name` would otherwise visit its `ctx` child.
+    # constant.
     visit_Constant = _skip_leaf
-    visit_Name = _skip_leaf
+
+    def visit_Name(self, node: ast.Name) -> None:
+        """Record bound names; don't descend into the `ctx` child."""
+        if type(node.ctx) is ast.Store:
+            self._bound.add(node.id)
+
+    def visit_arg(self, node: ast.arg) -> None:
+        """Record function and lambda parameters as bound names."""
+        self._bound.add(node.arg)
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        """
+        Analyze a function body in its own scope.
+
+        Parameters and names assigned in the body are local and shadow
+        frames of the enclosing scope. Enclosing frames stay visible but
+        quiet, since the function may run after they changed, and columns
+        the body may add to them are merged back afterwards.
+
+        Args:
+            node: The function definition AST node.
+        """
+        self._bound.add(node.name)
+        local_names, declared = _function_locals(node)
+        self._visit_scope(node, local_names, deferred=True, declared=declared)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        """Analyze a lambda with its parameters shadowing enclosing frames."""
+        self._visit_scope(node, _parameter_names(node.args), deferred=False)
+
+    def _visit_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+    ) -> None:
+        """Analyze a comprehension with its targets shadowing enclosing frames."""
+        local_names = {
+            child.id
+            for generator in node.generators
+            for child in ast.walk(generator.target)
+            if isinstance(child, ast.Name)
+        }
+        self._visit_scope(node, local_names, deferred=False)
+
+    visit_ListComp = _visit_comprehension
+    visit_SetComp = _visit_comprehension
+    visit_DictComp = _visit_comprehension
+    visit_GeneratorExp = _visit_comprehension
+
+    def _visit_scope(
+        self,
+        node: ast.AST,
+        local_names: set[str],
+        *,
+        deferred: bool,
+        declared: set[str] | frozenset[str] = frozenset(),
+    ) -> None:
+        """
+        Visit `node` in a nested scope where `local_names` shadow outer frames.
+
+        Args:
+            node: The scope's AST node.
+            local_names: Names local to the scope.
+            deferred: Whether the scope's code may run later (functions). If
+                so, enclosing frames are visible as quiet copies, and columns
+                the scope may add are merged into them afterwards. Otherwise
+                (lambdas, comprehensions) they are checked as usual.
+            declared: Names declared `global`/`nonlocal` in the scope.
+        """
+        saved_dfs, saved_definitions, saved_quiet = (
+            self.dfs,
+            self.definitions,
+            self._quiet,
+        )
+        visible = {n: t for n, t in saved_dfs.items() if n not in local_names}
+        copies = {}
+        if deferred:
+            copies = {n: t.copy() for n, t in visible.items()}
+            visible = dict(copies)
+            self._quiet = (saved_quiet - local_names) | copies.keys()
+        else:
+            self._quiet = saved_quiet - local_names
+        self.dfs = visible
+        self.definitions = {
+            k: v for k, v in saved_definitions.items() if k not in local_names
+        }
+        try:
+            self.generic_visit(node)
+        finally:
+            inner_dfs = self.dfs
+            self.dfs, self.definitions, self._quiet = (
+                saved_dfs,
+                saved_definitions,
+                saved_quiet,
+            )
+
+        # Columns the function may add are kept, and removals ignored, so
+        # the enclosing frame is a superset of what it may be after a call.
+        for name, copy in copies.items():
+            if inner_dfs.get(name) is not copy:
+                # Rebound through a global/nonlocal declaration: unknown now
+                if name in declared:
+                    saved_dfs.pop(name, None)
+                continue
+            outer = saved_dfs[name]
+            for column in copy.columns.keys() - outer.columns.keys():
+                outer.try_add(column)
+
+    def _report(self, frame_name: str | None, diag: diagnostic.Diagnostic) -> None:
+        """
+        Record a diagnostic about the frame named `frame_name`.
+
+        Frames from an enclosing scope seen inside a function body are quiet:
+        the function may run after the frame changed, so their state there
+        is uncertain.
+        """
+        if frame_name not in self._quiet:
+            self.diagnostics.append(diag)
+
+    def _is_known(self, name: str) -> bool:
+        """Whether `name` refers to a variable the code binds somewhere."""
+        return name in self.definitions or name in self._bound
 
     def visit_Import(self, node: ast.Import) -> None:
         """
@@ -210,6 +453,7 @@ class Checker(ast.NodeVisitor):
             if alias.name == "pandas":
                 # import pandas or import pandas as pd
                 self.pandas_aliases.add(alias.asname or alias.name)
+            self._bound.add(alias.asname or alias.name.partition(".")[0])
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -223,6 +467,8 @@ class Checker(ast.NodeVisitor):
             node: The import-from AST node.
         """
         # TODO: Handle `from pandas import DataFrame` etc.
+        for alias in node.names:
+            self._bound.add(alias.asname or alias.name)
         self.generic_visit(node)
 
     def _try_create_dataframe(self, node: ast.Assign) -> bool:
@@ -298,19 +544,21 @@ class Checker(ast.NodeVisitor):
         method = DF(columns).get_method(method_name)
         if method is None:
             return None
+        self._evaluated_calls.add(id(call))
 
         updated_df, returned_df, error = method(
             call.args, call.keywords, self.definitions
         )
         if error is not None:
-            self.diagnostics.append(
+            self._report(
+                _root_name(call),
                 diagnostic.missing_columns(
                     action=f"{label}.{method_name}()",
                     missing_cols=error.missing,
                     node=call,
                     df_name=label,
                     available_cols=list(method.df.columns),
-                )
+                ),
             )
         return method.df, updated_df, returned_df
 
@@ -397,14 +645,15 @@ class Checker(ast.NodeVisitor):
             return None
         label, columns = frame
         if missing := [col for col in col_names if col not in columns]:
-            self.diagnostics.append(
+            self._report(
+                _root_name(node),
                 diagnostic.missing_columns(
                     action=f"{label}{suffix}",
                     missing_cols=missing,
                     node=node,
                     df_name=label,
                     available_cols=list(columns),
-                )
+                ),
             )
         return f"{label}{suffix}", set(col_names)
 
@@ -482,6 +731,28 @@ class Checker(ast.NodeVisitor):
             # None); stop tracking it so it can't produce false positives.
             self.dfs.pop(target, None)
         return True
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """
+        Check DataFrame method calls in any expression position.
+
+        Calls not already handled as a statement or assignment, such as
+        `return df.drop(columns="X")` or `print(df.sort_values("X"))`, are
+        evaluated so errors in their arguments are reported. Their in-place
+        effects are not applied, which keeps the frame a superset.
+
+        Args:
+            node: The call AST node.
+        """
+        if (
+            isinstance(node.func, ast.Attribute)
+            and id(node) not in self._evaluated_calls
+            and _is_frame_root(_root_name(node), self.dfs, self.pandas_aliases)
+        ):
+            # Only chains rooted at a tracked frame or pandas can produce a
+            # frame; skipping the rest is cheap (np.where(...), s.str.lower())
+            self._eval_frame(node)
+        self.generic_visit(node)
 
     def visit_Expr(self, node: ast.Expr) -> None:
         """
@@ -561,7 +832,7 @@ class Checker(ast.NodeVisitor):
         if target_ref.df_name not in self.dfs:
             # A known variable without a tracked schema (e.g. a dict, or
             # pd.read_csv() without usecols) has nothing to check
-            if target_ref.df_name not in self.definitions:
+            if not self._is_known(target_ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(target_ref.node))
             return self.generic_visit(node)
 
@@ -581,7 +852,7 @@ class Checker(ast.NodeVisitor):
         for ref in read_refs:
             if ref.df_name in self.dfs:
                 tracked_refs.append(ref)
-            elif ref.df_name not in self.definitions:
+            elif not self._is_known(ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(ref.node))
                 return self.generic_visit(node)
         read_refs = tracked_refs
@@ -591,14 +862,15 @@ class Checker(ast.NodeVisitor):
 
         # Try to add the first column with dependencies, report error if missing
         if missing := tracker.try_add(target_ref.col_names[0], depends_on=read_cols):
-            self.diagnostics.append(
+            self._report(
+                target_ref.df_name,
                 diagnostic.wrong_assignment(
                     write_col=", ".join(target_ref.col_names),
                     missing_cols=missing,
                     write_node=target_ref.node,
                     df_name=target_ref.df_name,
                     available_cols=list(tracker.columns.keys()),
-                )
+                ),
             )
         else:
             # First column added successfully, add the rest
@@ -628,14 +900,15 @@ class Checker(ast.NodeVisitor):
             if tracker is None:
                 continue
             if missing := [c for c in ref.col_names if c not in tracker.columns]:
-                self.diagnostics.append(
+                self._report(
+                    ref.df_name,
                     diagnostic.missing_columns(
                         action="del",
                         missing_cols=missing,
                         node=ref.node,
                         df_name=ref.df_name,
                         available_cols=list(tracker.columns),
-                    )
+                    ),
                 )
             tracker.set_columns(tracker.columns.keys() - ref.col_names)
             # Not a read: don't validate the deleted column afterwards
@@ -660,13 +933,14 @@ class Checker(ast.NodeVisitor):
             return
         label, columns = frame
         if col_name not in columns:
-            self.diagnostics.append(
+            self._report(
+                _root_name(node.value),
                 diagnostic.wrong_read(
                     col_name=col_name,
                     node=node,
                     df_name=label,
                     available_cols=list(columns),
-                )
+                ),
             )
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
@@ -723,13 +997,14 @@ class Checker(ast.NodeVisitor):
             return self.generic_visit(node)
 
         if missing := tracker.try_get(ref.col_names[0]):
-            self.diagnostics.append(
+            self._report(
+                ref.df_name,
                 diagnostic.wrong_read(
                     col_name=missing,
                     node=ref.node,
                     df_name=ref.df_name,
                     available_cols=list(tracker.columns.keys()),
-                )
+                ),
             )
 
         self.generic_visit(node)
