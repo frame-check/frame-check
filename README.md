@@ -148,13 +148,15 @@ Each component should then have a README.md file with instructions on how to run
 
 ### column_removal_methods
 
-| id                      | title             | code                             | description                                                     | supported   |
-|:------------------------|:------------------|:---------------------------------|:----------------------------------------------------------------|:------------|
-| <a id="CRM-1"></a>CRM-1 | Del Statement     | del df['A']                      | In-place removal of a column using the Python del statement.    | ✅          |
-| <a id="CRM-2"></a>CRM-2 | Drop Method       | df = df.drop('A', axis=1)        | Returns a new DataFrame with the specified column removed.      | ✅          |
-| <a id="CRM-3"></a>CRM-3 | Drop With Columns | df = df.drop(columns=['A', 'B']) | More explicit way to drop columns using the columns parameter.  | ✅          |
-| <a id="CRM-4"></a>CRM-4 | Drop Multiple     | df = df.drop(['A','B'], axis=1)  | Removes multiple columns at once using a list of column names.  | ✅          |
-| <a id="CRM-5"></a>CRM-5 | Pop Method        | removed = df.pop('A')            | Removes a column from the DataFrame and returns it as a Series. | ✅          |
+| id                      | title             | code                             | description                                                        | supported   |
+|:------------------------|:------------------|:---------------------------------|:-------------------------------------------------------------------|:------------|
+| <a id="CRM-1"></a>CRM-1 | Del Statement     | del df['A']                      | In-place removal of a column using the Python del statement.       | ✅          |
+| <a id="CRM-2"></a>CRM-2 | Drop Method       | df = df.drop('A', axis=1)        | Returns a new DataFrame with the specified column removed.         | ✅          |
+| <a id="CRM-3"></a>CRM-3 | Drop With Columns | df = df.drop(columns=['A', 'B']) | More explicit way to drop columns using the columns parameter.     | ✅          |
+| <a id="CRM-4"></a>CRM-4 | Drop Multiple     | df = df.drop(['A','B'], axis=1)  | Removes multiple columns at once using a list of column names.     | ✅          |
+| <a id="CRM-5"></a>CRM-5 | Pop Method        | removed = df.pop('A')            | Removes a column from the DataFrame and returns it as a Series.    | ✅          |
+| <a id="CRM-7"></a>CRM-7 | Select Subset     | df = df[['A', 'B']]              | Keeps only the specified columns, effectively removing all others. | ✅          |
+| <a id="CRM-8"></a>CRM-8 | Loc Selection     | df = df.loc[:, ['A', 'B']]       | Label-based selection that keeps only the specified columns.       | ✅          |
 
 ### edge_cases
 

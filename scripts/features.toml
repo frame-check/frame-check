@@ -323,15 +323,15 @@ supported = false
 title = "Select subset"
 code = """df = df[['A', 'B']]"""
 description = "Keeps only the specified columns, effectively removing all others."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_8]
 title = "loc selection"
 code = """df = df.loc[:, ['A', 'B']]"""
 description = "Label-based selection that keeps only the specified columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_9]
 title = "iloc selection"

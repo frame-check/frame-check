@@ -71,11 +71,21 @@ def format_diagnostic(
 _generic_visit = ast.NodeVisitor.generic_visit
 
 
+def _constant_strs(elts: list[ast.expr]) -> list[str] | None:
+    """Return the values of a non-empty list of string constants, else None."""
+    values = []
+    for elt in elts:
+        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+            return None
+        values.append(elt.value)
+    return values or None
+
+
 def _root_name(expr: ast.expr) -> str | None:
-    """Return the name a method chain starts from (`df` in `df.a().b()`)."""
+    """Return the name a frame expression starts from (`df` in `df[...].a()`)."""
     while True:
         match expr:
-            case ast.Call(func=ast.Attribute(value=inner)):
+            case ast.Call(func=ast.Attribute(value=inner)) | ast.Subscript(value=inner):
                 expr = inner
             case ast.Name(id=name):
                 return name
@@ -122,6 +132,9 @@ class Checker(ast.NodeVisitor):
         """
         self._dispatch: dict[type[ast.AST], Callable[[Checker, ast.AST], None]] = {}
         self._skip_subscripts: set[int] = set()
+        # _eval_frame results by node id, so each expression's diagnostics
+        # are reported once however many code paths evaluate it
+        self._frames: dict[int, tuple[str, set[str]] | None] = {}
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
@@ -305,9 +318,10 @@ class Checker(ast.NodeVisitor):
         """
         Evaluate the columns of a DataFrame-valued expression.
 
-        Handles tracked names (`df`) and method chains rooted at one
-        (`df.assign(A=1).drop(columns="B")`). In-place effects on the
-        intermediate frames of a chain are discarded, like at runtime.
+        Handles tracked names (`df`), column subsets (`df[["A", "B"]]`) and
+        method chains rooted at one (`df.assign(A=1).drop(columns="B")`).
+        In-place effects on the intermediate frames of a chain are
+        discarded, like at runtime. Results are cached per node.
 
         Args:
             expr: The expression to evaluate.
@@ -316,6 +330,14 @@ class Checker(ast.NodeVisitor):
             A (label, columns) pair, where the label describes the expression
             for diagnostics, or None if it isn't a known DataFrame.
         """
+        key = id(expr)
+        if key in self._frames:
+            return self._frames[key]
+        frame = self._frames[key] = self._eval_frame_uncached(expr)
+        return frame
+
+    def _eval_frame_uncached(self, expr: ast.expr) -> tuple[str, set[str]] | None:
+        """Evaluate `expr` without the cache; see `_eval_frame`."""
         match expr:
             case ast.Name(id=name):
                 tracker = self.dfs.get(name)
@@ -331,8 +353,74 @@ class Checker(ast.NodeVisitor):
                 if result is None or result[2] is None:
                     return None
                 return f"{label}.{method_name}(...)", result[2].columns
+            case ast.Subscript(value=inner, slice=ast.List(elts=elts)):
+                # df[["A", "B"]]
+                frame = self._eval_frame(inner)
+                if frame is None:
+                    return None
+                return self._select(frame, elts, expr, "[[...]]")
+            case ast.Subscript(
+                value=ast.Attribute(value=inner, attr="loc"),
+                slice=ast.Tuple(elts=[_, col_selector]),
+            ):
+                # df.loc[rows, ["A", "B"]] / df.loc[rows, :]
+                frame = self._eval_frame(inner)
+                if frame is None:
+                    return None
+                match col_selector:
+                    case ast.List(elts=elts):
+                        return self._select(frame, elts, expr, ".loc[...]")
+                    case ast.Slice(lower=None, upper=None, step=None):
+                        return f"{frame[0]}.loc[...]", frame[1]
+                return None
             case _:
                 return None
+
+    def _select(
+        self,
+        frame: tuple[str, set[str]],
+        elts: list[ast.expr],
+        node: ast.expr,
+        suffix: str,
+    ) -> tuple[str, set[str]] | None:
+        """
+        Select the columns listed in `elts` from `frame`.
+
+        Selecting unknown labels raises KeyError, so they are reported.
+
+        Returns:
+            The selected frame, or None if the labels aren't all string
+            constants.
+        """
+        col_names = _constant_strs(elts)
+        if col_names is None:
+            return None
+        label, columns = frame
+        if missing := [col for col in col_names if col not in columns]:
+            self.diagnostics.append(
+                diagnostic.missing_columns(
+                    action=f"{label}{suffix}",
+                    missing_cols=missing,
+                    node=node,
+                    df_name=label,
+                    available_cols=list(columns),
+                )
+            )
+        return f"{label}{suffix}", set(col_names)
+
+    def _bind_frame(self, target: str, value: ast.expr, columns: Iterable[str]) -> None:
+        """
+        Bind the columns of a DataFrame-valued expression to `target`.
+
+        For `df = df...` (the value is derived from the target itself), the
+        existing tracker is diffed instead of rebuilt, which also keeps
+        column dependencies.
+        """
+        tracker = self.dfs.get(target)
+        if tracker is not None and _root_name(value) == target:
+            tracker.set_columns(set(columns))
+        else:
+            self.dfs[target] = Tracker.new_with_columns(target, columns=list(columns))
 
     def _try_dataframe_method(self, call: ast.expr, target: str | None) -> bool:
         """
@@ -388,15 +476,7 @@ class Checker(ast.NodeVisitor):
             return True
 
         if returned_df is not None:
-            target_tracker = self.dfs.get(target)
-            if target_tracker is not None and _root_name(call) == target:
-                # df = df.method(...): diff the existing tracker instead of
-                # rebuilding it, which also keeps column dependencies.
-                target_tracker.set_columns(returned_df.columns)
-            else:
-                self.dfs[target] = Tracker.new_with_columns(
-                    target, columns=list(returned_df.columns)
-                )
+            self._bind_frame(target, call, returned_df.columns)
         else:
             # The target now holds a non-DataFrame result (e.g. a Series or
             # None); stop tracking it so it can't produce false positives.
@@ -446,6 +526,17 @@ class Checker(ast.NodeVisitor):
             and isinstance(node.targets[0], ast.Name)
             and self._try_dataframe_method(node.value, target=node.targets[0].id)
         ):
+            self.generic_visit(node)
+            return
+
+        # Column subsets: df2 = df[["A", "B"]]
+        if (
+            len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Subscript)
+            and (frame := self._eval_frame(node.value)) is not None
+        ):
+            self._bind_frame(node.targets[0].id, node.value, frame[1])
             self.generic_visit(node)
             return
 
@@ -591,13 +682,25 @@ class Checker(ast.NodeVisitor):
         Skips processing for:
         - Subscripts already handled in `visit_Assign`
         - Non-column subscripts (e.g., `list[0]`)
-        - Multi-column reads (e.g., `df[['a', 'b']]`)
 
         Args:
             node: The subscript AST node to validate.
         """
         # Skip if already handled in visit_Assign
         if id(node) in self._skip_subscripts:
+            return self.generic_visit(node)
+
+        # Column subsets: df[["A", "B"]], df.loc[:, ["A"]] (validated while
+        # evaluating). Only reads: assigning to df.loc[:, [...]] may add columns.
+        if isinstance(node.ctx, ast.Load) and (
+            isinstance(node.slice, ast.List)
+            or (
+                isinstance(node.slice, ast.Tuple)
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "loc"
+            )
+        ):
+            self._eval_frame(node)
             return self.generic_visit(node)
 
         # Chained read: df.assign(A=1)["A"]
