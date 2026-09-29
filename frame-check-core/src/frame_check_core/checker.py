@@ -68,9 +68,6 @@ def format_diagnostic(
     return f"{file_path}:{loc.row}:{loc.col}: {diag.message}"
 
 
-_generic_visit = ast.NodeVisitor.generic_visit
-
-
 def _parameter_names(args: ast.arguments) -> set[str]:
     """Return the names of all parameters in a function signature."""
     names = {arg.arg for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
@@ -289,9 +286,28 @@ class Checker(ast.NodeVisitor):
         try:
             visitor = self._dispatch[cls]
         except KeyError:
-            visitor = getattr(type(self), "visit_" + cls.__name__, _generic_visit)
+            visitor = getattr(
+                type(self), "visit_" + cls.__name__, type(self).generic_visit
+            )
             self._dispatch[cls] = visitor
         visitor(self, node)
+
+    def generic_visit(self, node: ast.AST) -> None:
+        """
+        Visit all child nodes.
+
+        Same as `ast.NodeVisitor.generic_visit`, without its `iter_fields`
+        generator, which is the single largest cost of a check.
+        """
+        visit = self.visit
+        for field in node._fields:
+            value = getattr(node, field, None)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        visit(item)
+            elif isinstance(value, ast.AST):
+                visit(value)
 
     def _skip_leaf(self, node: ast.AST) -> None:
         """Leaf nodes can't contain column references, so don't descend."""
