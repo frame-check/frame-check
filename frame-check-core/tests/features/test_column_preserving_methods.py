@@ -126,3 +126,50 @@ df2 = df.{call}
 """
     fc = Checker.check(code)
     assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        ("df.reset_index()", {"a", "index"}),
+        ("df.reset_index(drop=True)", {"a"}),
+        ("df.assign(index=1).reset_index()", {"a", "index", "level_0"}),
+        ("df.reset_index(names='row')", {"a", "row"}),
+    ],
+)
+def test_reset_index_matches_pandas(call: str, expected: set[str]):
+    import pandas as pd
+
+    assert set(eval(call, {"df": pd.DataFrame({"a": [1]})}).columns) == expected
+
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{"a": [1]}})
+out = {call}
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["out"].columns) == expected
+
+
+def test_reset_index_then_read_index_column():
+    """df = df.reset_index() adds the index column (was a false positive)."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df = df.reset_index()
+df["index"]
+df.reset_index(inplace=True)
+df["level_0"]
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 0
+
+
+def test_reset_index_with_level_stops_tracking():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+out = df.reset_index(level=0)
+"""
+    fc = Checker.check(code)
+    assert "out" not in fc.dfs

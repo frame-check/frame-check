@@ -90,6 +90,19 @@ A single-argument lambda is resolved to a `ColumnLambda` whose `columns` lists
 the labels it reads from its argument (`lambda x: x["A"] + x["B"]` gives
 `("A", "B")`). Use it to validate callables such as those passed to `assign()`.
 
+## Frames in arguments
+
+An argument that evaluates to a tracked frame (a name, a chain or a column
+selection) arrives as a `DF` value with its `columns` and a `label` for
+diagnostics, e.g. `right` in `df.merge(right, on="key")`. Anything else that
+can't be resolved arrives as `Unknown`; return `None` as the returned columns
+then, so the result stops being tracked instead of being guessed. To report
+columns missing from the other frame, pass it to the error:
+
+```python
+IllegalAccess(missing=["key"], frame=right.label, available=sorted(right.columns))
+```
+
 ## Where handlers run
 
 You don't need to handle call sites yourself. The checker runs a registered

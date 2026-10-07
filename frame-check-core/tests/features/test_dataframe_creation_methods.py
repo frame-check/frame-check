@@ -162,3 +162,34 @@ df = pd.read_parquet('data.parquet', columns=cols)
     assert tracker is not None
     assert tracker.id_ == "df"
     assert set(tracker.columns.keys()) == {"a", "b"}
+
+
+# --- DCMS-14: Copy constructor ---
+
+
+@pytest.mark.support(code="#DCMS-14")
+def test_dcms_14_copy_constructor():
+    """pd.DataFrame(other_df)"""
+    code = """
+import pandas as pd
+other_df = pd.DataFrame({"a": [1], "b": [2]})
+df = pd.DataFrame(other_df)
+df2 = pd.DataFrame(other_df[["a"]].assign(c=1))
+df["a"]
+df2["b"]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"a", "b"}
+    assert set(fc.dfs["df2"].columns.keys()) == {"a", "c"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'b' does not exist on DataFrame 'df2'." in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#DCMS-14-1")
+def test_dcms_14_1_copy_of_untracked_frame_is_not_tracked():
+    code = """
+import pandas as pd
+df = pd.DataFrame(load())
+"""
+    fc = Checker.check(code)
+    assert "df" not in fc.dfs

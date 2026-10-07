@@ -1,5 +1,13 @@
 from ..diagnostic import IllegalAccess
-from .models import DF, ColumnLambda, DFFuncResult, Result, Unknown, idx_or_key
+from .models import (
+    DF,
+    UNPACKED,
+    ColumnLambda,
+    DFFuncResult,
+    Result,
+    Unknown,
+    idx_or_key,
+)
 
 
 def _column_labels(value: Result) -> set[str] | None:
@@ -17,6 +25,10 @@ def _column_labels(value: Result) -> set[str] | None:
 def df_assign(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
+    if UNPACKED in keywords:
+        # assign(**mapping) with a mapping we can't resolve: columns unknown
+        return columns, None, None
+
     # Keywords are assigned in order; a callable sees the columns created by
     # the keywords before it, so validate lambda reads against that state.
     returned = set(columns)
@@ -48,21 +60,24 @@ def df_insert(
 def df_rename(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    col_mapping = idx_or_key(args, keywords, key="columns")
-
-    # Mapper+axis form: df.rename({"a": "b"}, axis=1) / axis="columns"
-    if not isinstance(col_mapping, dict):
-        axis = idx_or_key(args, keywords, idx=1, key="axis")
-        if axis == 1 or axis == "columns":
-            col_mapping = idx_or_key(args, keywords, idx=0, key="mapper")
-
     inplace = idx_or_key(args, keywords, key="inplace")
 
+    if "columns" in keywords:
+        col_mapping = keywords["columns"]
+    else:
+        # Mapper+axis form: df.rename({"a": "b"}, axis=1) / axis="columns"
+        axis = idx_or_key(args, keywords, idx=1, key="axis")
+        if not (axis == 1 or axis == "columns"):
+            # Only the index is renamed
+            return columns, None if inplace is True else columns, None
+        col_mapping = idx_or_key(args, keywords, idx=0, key="mapper")
+
     if not isinstance(col_mapping, dict):
-        # Can't determine rename statically — leave columns untouched
+        # A callable (str.upper) or an unresolved mapping renames columns in
+        # ways we can't know: the result is unknown
         if inplace is True:
-            return columns, None, None
-        return columns, columns, None
+            return None, None, None
+        return columns, None, None
 
     new_columns = set()
     for col in columns:
@@ -208,3 +223,229 @@ def df_astype(
         return _same_columns(columns, args, keywords)
     required = [k for k in dtype if isinstance(k, str)]
     return _same_columns(columns, args, keywords, required=required)
+
+
+_DEFAULT_SUFFIXES = ("_x", "_y")
+
+# Positional parameters after `right` in DataFrame.merge / pd.merge
+MERGE_PARAMS = (
+    "how",
+    "on",
+    "left_on",
+    "right_on",
+    "left_index",
+    "right_index",
+    "sort",
+    "suffixes",
+    "copy",
+    "indicator",
+)
+
+
+def bind_positional(
+    args: list[Result], keywords: dict[str, Result], names: tuple[str, ...]
+) -> dict[str, Result]:
+    """Merge positional `args` into `keywords` using the parameter `names`."""
+    bound = dict(zip(names, args, strict=False))
+    bound.update(keywords)
+    return bound
+
+
+def merge_columns(
+    left: set[str],
+    left_label: str | None,
+    right: Result,
+    keywords: dict[str, Result],
+) -> tuple[set[str] | None, IllegalAccess | None]:
+    """
+    Compute the columns of `left.merge(right, ...)` (and `pd.merge`).
+
+    Join keys appear once; other columns present on both sides get the
+    `suffixes` (default `_x`/`_y`, `None` = unchanged). Keys missing from
+    either side raise KeyError, so they are returned as an error.
+
+    Args:
+        left: Columns of the left frame.
+        left_label: Label of the left frame for diagnostics, or None when it
+            is the frame the method is called on.
+        right: The right frame argument.
+        keywords: The remaining arguments by name (see `bind_positional`).
+
+    Returns:
+        The merged columns (None when they can't be determined statically)
+        and an error for missing keys, if any.
+    """
+    if not isinstance(right, DF) or UNPACKED in keywords:
+        return None, None
+    right_columns = right.columns
+
+    left_index = keywords.get("left_index") is True
+    right_index = keywords.get("right_index") is True
+    missing_left: set[str] = set()
+    missing_right: set[str] = set()
+
+    if left_index != right_index:
+        # One-sided index merges have irregular output columns
+        return None, None
+    if keywords.get("how") == "cross" or left_index:
+        shared: set[str] = set()
+    elif keywords.get("on") is not None:
+        on = _column_labels(keywords["on"])
+        if on is None:
+            return None, None
+        missing_left, missing_right = on - left, on - right_columns
+        shared = on
+    elif keywords.get("left_on") is not None or keywords.get("right_on") is not None:
+        left_on = _column_labels(keywords.get("left_on") or [])
+        right_on = _column_labels(keywords.get("right_on") or [])
+        if left_on is None or right_on is None:
+            return None, None
+        missing_left, missing_right = left_on - left, right_on - right_columns
+        shared = left_on & right_on
+    else:
+        # Default: join on the columns both frames have
+        shared = left & right_columns
+        if not shared:
+            return None, None
+
+    error = None
+    if missing_left:
+        error = IllegalAccess(
+            missing=sorted(missing_left),
+            frame=left_label,
+            available=sorted(left) if left_label is not None else None,
+        )
+    elif missing_right:
+        error = IllegalAccess(
+            missing=sorted(missing_right),
+            frame=right.label,
+            available=sorted(right_columns),
+        )
+
+    suffixes = keywords.get("suffixes", list(_DEFAULT_SUFFIXES))
+    if not (
+        isinstance(suffixes, list)
+        and len(suffixes) == 2
+        and all(s is None or isinstance(s, str) for s in suffixes)
+    ):
+        return None, error
+    left_suffix, right_suffix = suffixes
+
+    overlap = (left & right_columns) - shared
+    merged = (left - overlap) | (right_columns - overlap)
+    for column in overlap:
+        merged.add(column + left_suffix if left_suffix else column)
+        merged.add(column + right_suffix if right_suffix else column)
+
+    indicator = keywords.get("indicator")
+    if indicator is True:
+        merged.add("_merge")
+    elif isinstance(indicator, str):
+        merged.add(indicator)
+    return merged, error
+
+
+@DF.register("merge")
+def df_merge(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    right = idx_or_key(args, keywords, idx=0, key="right")
+    params = bind_positional(args[1:], keywords, MERGE_PARAMS)
+    merged, error = merge_columns(columns, None, right, params)
+    return columns, merged, error
+
+
+_JOIN_PARAMS = ("on", "how", "lsuffix", "rsuffix", "sort", "validate")
+
+
+@DF.register("join")
+def df_join(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    other = idx_or_key(args, keywords, idx=0, key="other")
+    params = bind_positional(args[1:], keywords, _JOIN_PARAMS)
+    if UNPACKED in params:
+        return columns, None, None
+
+    # `on` names a column of the calling frame; unknown labels raise KeyError
+    error = None
+    if params.get("on") is not None:
+        on = _column_labels(params["on"])
+        if on is None:
+            return columns, None, None
+        if missing := on - columns:
+            error = IllegalAccess(missing=sorted(missing))
+
+    match other:
+        case DF():
+            others = [other.columns]
+        case list() if other and all(isinstance(o, DF) for o in other):
+            others = [o.columns for o in other if isinstance(o, DF)]
+        case _:
+            # Series or unresolved frames: columns unknown
+            return columns, None, error
+
+    lsuffix = params.get("lsuffix", "")
+    rsuffix = params.get("rsuffix", "")
+    if not (isinstance(lsuffix, str) and isinstance(rsuffix, str)):
+        return columns, None, error
+
+    if len(others) > 1:
+        # Joining a list of frames: any overlapping columns raise ValueError
+        seen = set(columns)
+        for other_columns in others:
+            if seen & other_columns:
+                return columns, None, error
+            seen |= other_columns
+        return columns, seen, error
+
+    right = others[0]
+    overlap = columns & right
+    if overlap and not (lsuffix or rsuffix):
+        # "columns overlap but no suffix specified" (ValueError)
+        return columns, None, error
+    joined = (columns - overlap) | (right - overlap)
+    for column in overlap:
+        joined.add(column + lsuffix)
+        joined.add(column + rsuffix)
+    return columns, joined, error
+
+
+_RESET_INDEX_PARAMS = (
+    "level",
+    "drop",
+    "inplace",
+    "col_level",
+    "col_fill",
+    "allow_duplicates",
+    "names",
+)
+
+
+@DF.register("reset_index")
+def df_reset_index(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, _RESET_INDEX_PARAMS)
+    inplace = params.get("inplace") is True
+
+    if params.get("drop") is True:
+        new_columns = columns
+    elif params.get("level") is not None:
+        # Moves some index levels, whose names aren't tracked
+        return (None, None, None) if inplace else (columns, None, None)
+    else:
+        names = params.get("names")
+        if names is None:
+            # The index isn't tracked; a default index becomes "index" (or
+            # "level_0" when taken). A named index's column is typically
+            # still in the tracked columns, since set_index isn't tracked.
+            new_columns = columns | {"level_0" if "index" in columns else "index"}
+        elif isinstance(names, str):
+            new_columns = columns | {names}
+        else:
+            return (None, None, None) if inplace else (columns, None, None)
+
+    if inplace:
+        return new_columns, None, None
+    return columns, new_columns, None

@@ -425,3 +425,65 @@ total = df.drop(columns="X")["A"]
 """
     checker = Checker.check(code)
     assert len(checker.diagnostics) == 4
+
+
+# --- pandas calls as frame expressions ---
+
+
+def test_chain_from_pandas_constructor():
+    """pd.DataFrame(...).assign(...) is tracked through the chain."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]}).assign(B=lambda x: x["A"] * 2)
+df2 = pd.read_csv("f.csv", usecols=["A", "B"])[["A"]]
+df["B"]
+df2["B"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"A", "B"}
+    assert set(checker.dfs["df2"].columns) == {"A"}
+    assert len(checker.diagnostics) == 1
+    assert (
+        "Column 'B' does not exist on DataFrame 'df2'."
+        in checker.diagnostics[0].message
+    )
+
+
+def test_read_from_pandas_constructor_expression():
+    code = """
+import pandas as pd
+print(pd.DataFrame({"A": [1]})["Z"])
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "DataFrame 'pd.DataFrame(...)'" in checker.diagnostics[0].message
+
+
+def test_method_error_points_at_the_failing_method():
+    """Errors in a multi-line chain point at the method that raises."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+out = (
+    df.assign(B=1)
+    .drop(columns="X")
+)
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    region = checker.diagnostics[0].region
+    assert (region.start.row, region.start.col) == (6, 5)
+    assert (region.end.row, region.end.col) == (7, 22)
+
+
+def test_multi_column_right_hand_side_checks_every_column():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1], "B": [2]})
+df[["C", "D"]] = df[["A", "X"]]
+df[["E", "F"]] = df[["A", "B"]]
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "column 'X' does not exist" in checker.diagnostics[0].message
+    assert checker.dfs["df"].columns["E"] == {"A", "B"}

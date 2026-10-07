@@ -81,8 +81,8 @@ supported = false
 title = "Copy Constructor"
 code = """pd.DataFrame(other_df)"""
 description = "Creates a DataFrame as a copy of another DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_15]
 title = "From Records"
@@ -110,9 +110,9 @@ supported = true
 [column_assignment_methods.cam_2]
 title = "Attribute assignment"
 code = """df.col = value"""
-description = "Works only for valid Python identifiers. Not recommended for production code due to potential conflicts with DataFrame methods."
-tested = false
-supported = false
+description = "Only updates an existing column. Assigning a new attribute name does not create a column (pandas warns and sets a plain attribute)."
+tested = true
+supported = true
 
 [column_assignment_methods.cam_3]
 title = "loc indexer"
@@ -181,22 +181,22 @@ supported = false
 title = "concat"
 code = """df = pd.concat([df, new_df], axis=1)"""
 description = "Combines columns from two DataFrames through horizontal concatenation."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_13]
 title = "join"
 code = """df = df.join(other_df)"""
 description = "Adds columns from another DataFrame based on index alignment."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_14]
 title = "merge"
 code = """df = df.merge(df2, on='key')"""
 description = "Adds columns through merging DataFrames on common columns or indices."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_15]
 title = "From eval"
@@ -315,9 +315,9 @@ supported = true
 [column_removal_methods.crm_6]
 title = "Assign None"
 code = """df = df.assign(col=None)"""
-description = "Indirect method of column removal by assigning None (not common)."
-tested = false
-supported = false
+description = "Does not remove the column: it keeps it with every value set to None."
+tested = true
+supported = true
 
 [column_removal_methods.crm_7]
 title = "Select subset"

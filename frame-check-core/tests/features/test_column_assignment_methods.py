@@ -22,6 +22,26 @@ df["c"]
     assert len(fc.diagnostics) == 0
 
 
+# --- CAM-2: Attribute assignment ---
+
+
+@pytest.mark.support(code="#CAM-2")
+def test_cam_2_attribute_assignment_does_not_create_columns():
+    """df.new = value sets a plain attribute (pandas warns), not a column."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df.a = [2]
+df.new = [5]
+df["a"]
+df["new"]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"a"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'new' does not exist" in fc.diagnostics[0].message
+
+
 # --- CAM-7: assign method ---
 
 
@@ -142,7 +162,7 @@ def test_cam_7_6_chain_on_untracked_frame_is_ignored():
 import pandas as pd
 df = pd.DataFrame({"A": [1]})
 other = load().assign(B=1)
-df2 = df.reset_index().assign(B=1)
+df2 = df.set_index("A").assign(B=1)
 """
     fc = Checker.check(code)
     assert "other" not in fc.dfs
@@ -221,6 +241,34 @@ df = df.assign(B=1).assign(C=lambda x: x["B"] * 2)
 """
     fc = Checker.check(code)
     assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-8-5")
+def test_cam_8_5_assign_with_unpacked_literal_dict():
+    """df.assign(**{"B": 1}) adds B (was a false positive)."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(**{"B": 1}, C=2)
+df["B"]
+df["C"]
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 0
+
+
+@pytest.mark.support(code="#CAM-8-6")
+def test_cam_8_6_assign_with_unresolved_mapping_stops_tracking():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"A": [1]})
+df = df.assign(**new_columns)
+df["anything"]
+"""
+    fc = Checker.check(code)
+    assert "df" not in fc.dfs
     assert len(fc.diagnostics) == 0
 
 
