@@ -81,9 +81,9 @@ def _parameter_names(args: ast.arguments) -> set[str]:
 
 def _function_locals(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> tuple[set[str], set[str]]:
+) -> set[str]:
     """
-    Return the names local to a function, and those declared global/nonlocal.
+    Return the names local to a function (excluding global/nonlocal ones).
 
     Only statements can bind names in a function body (walrus targets
     aside), so walking statement blocks is enough and much cheaper than
@@ -92,7 +92,7 @@ def _function_locals(
     local_names = _parameter_names(node.args)
     declared: set[str] = set()
     _collect_bound_names(node.body, local_names, declared)
-    return local_names - declared, declared
+    return local_names - declared
 
 
 def _collect_bound_names(
@@ -359,8 +359,7 @@ class Checker(ast.NodeVisitor):
             node: The function definition AST node.
         """
         self._bound.add(node.name)
-        local_names, declared = _function_locals(node)
-        self._visit_scope(node, local_names, deferred=True, declared=declared)
+        self._visit_scope(node, _function_locals(node), deferred=True)
 
     visit_AsyncFunctionDef = visit_FunctionDef
 
@@ -391,7 +390,6 @@ class Checker(ast.NodeVisitor):
         local_names: set[str],
         *,
         deferred: bool,
-        declared: set[str] | frozenset[str] = frozenset(),
     ) -> None:
         """
         Visit `node` in a nested scope where `local_names` shadow outer frames.
@@ -403,7 +401,6 @@ class Checker(ast.NodeVisitor):
                 so, enclosing frames are visible as quiet copies, and columns
                 the scope may add are merged into them afterwards. Otherwise
                 (lambdas, comprehensions) they are checked as usual.
-            declared: Names declared `global`/`nonlocal` in the scope.
         """
         saved_dfs, saved_definitions, saved_quiet = (
             self.dfs,
@@ -436,9 +433,9 @@ class Checker(ast.NodeVisitor):
         # the enclosing frame is a superset of what it may be after a call.
         for name, copy in copies.items():
             if inner_dfs.get(name) is not copy:
-                # Rebound through a global/nonlocal declaration: unknown now
-                if name in declared:
-                    saved_dfs.pop(name, None)
+                # Rebound through `global`, or changed in place in a way we
+                # can't follow (e.g. df.columns = load()): unknown now
+                saved_dfs.pop(name, None)
                 continue
             outer = saved_dfs[name]
             for column in copy.columns.keys() - outer.columns.keys():
