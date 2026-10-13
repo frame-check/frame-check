@@ -1,3 +1,5 @@
+import re
+
 from ..diagnostic import IllegalAccess
 from .models import (
     DF,
@@ -449,3 +451,68 @@ def df_reset_index(
     if inplace:
         return new_columns, None, None
     return columns, new_columns, None
+
+
+@DF.register("reindex")
+def df_reindex(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # The labels define the columns exactly; unknown ones become NaN columns
+    if "columns" in keywords:
+        labels = keywords["columns"]
+    else:
+        axis = keywords.get("axis")
+        if not (axis == 1 or axis == "columns"):
+            # Only the index is reindexed
+            return columns, columns, None
+        labels = idx_or_key(args, keywords, idx=0, key="labels")
+
+    names = _column_labels(labels)
+    if names is None or (isinstance(labels, list) and len(names) != len(labels)):
+        return columns, None, None
+    return columns, names, None
+
+
+@DF.register("filter")
+def df_filter(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, ("items", "like", "regex", "axis"))
+    axis = params.get("axis")
+    if axis in (0, "index", "rows"):
+        # Filters row labels
+        return columns, columns, None
+    if axis not in (None, 1, "columns"):
+        return columns, None, None
+
+    # Unknown labels in items= are skipped silently; like/regex are computed
+    # on the known columns (pandas uses `in` and re.search)
+    if (items := params.get("items")) is not None:
+        names = _column_labels(items)
+        return columns, (columns & names if names is not None else None), None
+    if isinstance(like := params.get("like"), str):
+        return columns, {c for c in columns if like in c}, None
+    if isinstance(regex := params.get("regex"), str):
+        try:
+            pattern = re.compile(regex)
+        except re.error:
+            return columns, None, None
+        return columns, {c for c in columns if pattern.search(c)}, None
+    return columns, None, None
+
+
+@DF.register("groupby")
+def df_groupby(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Returns a GroupBy, not a frame. String keys must be columns (KeyError);
+    # other keys (Series, functions, level=) aren't checked.
+    by = idx_or_key(args, keywords, idx=0, key="by")
+    if isinstance(by, str):
+        by = [by]
+    error = None
+    if isinstance(by, list) and keywords.get("level") is None:
+        keys = {key for key in by if isinstance(key, str)}
+        if missing := keys - columns:
+            error = IllegalAccess(missing=sorted(missing))
+    return columns, None, error

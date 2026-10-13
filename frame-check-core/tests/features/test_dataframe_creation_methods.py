@@ -193,3 +193,152 @@ df = pd.DataFrame(load())
 """
     fc = Checker.check(code)
     assert "df" not in fc.dfs
+
+
+# --- pd.DataFrame(...) with columns= (DCMS-4, DCMS-5, DCMS-12, DCMS-13, DCMS-3) ---
+
+
+def _pandas_columns(expr: str) -> set[str]:
+    import numpy as np
+    import pandas as pd
+
+    namespace = {"pd": pd, "np": np, "other": pd.DataFrame({"A": [1], "B": [2]})}
+    return set(eval(expr, namespace).columns)
+
+
+def _checker_columns(expr: str) -> set[str] | None:
+    code = f"""
+import numpy as np
+import pandas as pd
+other = pd.DataFrame({{"A": [1], "B": [2]}})
+out = {expr}
+"""
+    fc = Checker.check(code)
+    assert fc.diagnostics == []
+    tracker = fc.dfs.get("out")
+    return None if tracker is None else set(tracker.columns)
+
+
+CONSTRUCTOR_CASES = [
+    pytest.param('pd.DataFrame([[1, 2]], columns=["c1", "c2"])', id="DCMS-5"),
+    pytest.param('pd.DataFrame(np.array([[1, 2]]), columns=["c1", "c2"])', id="DCMS-4"),
+    pytest.param('pd.DataFrame(index=["x"], columns=["c1", "c2"])', id="DCMS-12"),
+    pytest.param('pd.DataFrame({"col1": 1}, index=[0, 1])', id="DCMS-13"),
+    pytest.param(
+        'pd.DataFrame({"c1": pd.Series([1]), "c2": pd.Series([2])})', id="DCMS-3"
+    ),
+    pytest.param('pd.DataFrame({"a": [1], "b": [2]}, columns=["a", "z"])', id="dict"),
+    pytest.param('pd.DataFrame([{"a": 1, "b": 2}], columns=["b"])', id="records"),
+    pytest.param('pd.DataFrame(other, columns=["A", "Q"])', id="frame"),
+    pytest.param('pd.DataFrame([[1, 2]], None, ["c1", "c2"])', id="positional"),
+    pytest.param("pd.DataFrame()", id="empty"),
+]
+
+
+@pytest.mark.parametrize("expr", CONSTRUCTOR_CASES)
+def test_constructor_matches_pandas(expr: str):
+    assert _checker_columns(expr) == _pandas_columns(expr)
+
+
+@pytest.mark.support(code="#DCMS-5")
+def test_dcms_5_list_of_lists():
+    """pd.DataFrame([[1, 2], [3, 4]], columns=['col1', 'col2'])"""
+    expr = "pd.DataFrame([[1, 2], [3, 4]], columns=['col1', 'col2'])"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.support(code="#DCMS-4")
+def test_dcms_4_numpy_array():
+    """pd.DataFrame(np.array([[1, 2], [3, 4]]), columns=['col1', 'col2'])"""
+    expr = "pd.DataFrame(np.array([[1, 2], [3, 4]]), columns=['col1', 'col2'])"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.support(code="#DCMS-12")
+def test_dcms_12_from_index():
+    """pd.DataFrame(index=['a', 'b'], columns=['col1', 'col2'])"""
+    expr = "pd.DataFrame(index=['a', 'b'], columns=['col1', 'col2'])"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.support(code="#DCMS-13")
+def test_dcms_13_from_scalar():
+    """pd.DataFrame({'col1': 1}, index=[0, 1, 2])"""
+    assert _checker_columns("pd.DataFrame({'col1': 1}, index=[0, 1, 2])") == {"col1"}
+
+
+@pytest.mark.support(code="#DCMS-3")
+def test_dcms_3_dictionary_of_series():
+    """pd.DataFrame({'col1': pd.Series([1, 2]), 'col2': pd.Series([3, 4])})"""
+    expr = "pd.DataFrame({'col1': pd.Series([1, 2]), 'col2': pd.Series([3, 4])})"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+def test_unresolved_columns_argument_is_not_tracked():
+    assert _checker_columns("pd.DataFrame([[1]], columns=names)") is None
+
+
+FROM_CASES = [
+    pytest.param('pd.DataFrame.from_dict({"c1": [1], "c2": [2]})', id="from_dict"),
+    pytest.param(
+        'pd.DataFrame.from_dict({"r1": [1, 2]}, orient="index", columns=["c1", "c2"])',
+        id="from_dict-index",
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([("a", 1)], columns=["c1", "c2"])',
+        id="from_records",
+    ),
+    pytest.param('pd.DataFrame.from_records([{"a": 1, "b": 2}])', id="records-dicts"),
+    pytest.param(
+        'pd.DataFrame.from_records([{"a": 1, "b": 2}], exclude=["b"])', id="exclude"
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([{"a": 1, "b": 2}], index="a")', id="index"
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([("x", 1)], columns=["c1", "c2"], index="c1")',
+        id="index-columns",
+    ),
+]
+
+
+@pytest.mark.parametrize("expr", FROM_CASES)
+def test_from_constructors_match_pandas(expr: str):
+    assert _checker_columns(expr) == _pandas_columns(expr)
+
+
+@pytest.mark.support(code="#DCMS-15")
+def test_dcms_15_from_records():
+    """pd.DataFrame.from_records([('a', 1), ('b', 2)], columns=['col1', 'col2'])"""
+    expr = "pd.DataFrame.from_records([('a', 1), ('b', 2)], columns=['col1', 'col2'])"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.support(code="#DCMS-16")
+def test_dcms_16_from_dict():
+    """pd.DataFrame.from_dict({'col1': [1, 2], 'col2': [3, 4]})"""
+    expr = "pd.DataFrame.from_dict({'col1': [1, 2], 'col2': [3, 4]})"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        'pd.DataFrame.from_dict({"r1": [1, 2]}, orient="index")',
+        "pd.DataFrame.from_dict(data)",
+        "pd.DataFrame.from_records(rows)",
+    ],
+)
+def test_unresolved_from_constructors_are_not_tracked(expr: str):
+    assert _checker_columns(expr) is None
+
+
+def test_read_on_from_dict_is_checked():
+    code = """
+import pandas as pd
+df = pd.DataFrame.from_dict({"c1": [1]})
+df["c2"]
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert "Column 'c2' does not exist on DataFrame 'df'." in fc.diagnostics[0].message

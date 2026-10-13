@@ -71,3 +71,20 @@ def test_right_hand_side_is_checked_before_the_column_exists():
     fc = Checker.check(SETUP + 'df.loc[:, "n"] = df["n"]\n')
     assert len(fc.diagnostics) == 1
     assert "Column 'n' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CAM-4")
+def test_cam_4_iloc_assignment_keeps_columns():
+    """df.iloc[:, 0] = value changes values; iloc can't add columns."""
+    fc = Checker.check(SETUP + 'df.iloc[:, 0] = 1\ndf["A"]\ndf["new"]\n')
+    assert set(fc.dfs["df"].columns) == {"A", "B"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'new' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CAM-6")
+def test_cam_6_iat_assignment_keeps_columns():
+    """df.iat[0, 1] = value changes one value; iat can't add columns."""
+    fc = Checker.check(SETUP + 'df.iat[0, 1] = 1\ndf["B"]\n')
+    assert set(fc.dfs["df"].columns) == {"A", "B"}
+    assert fc.diagnostics == []
