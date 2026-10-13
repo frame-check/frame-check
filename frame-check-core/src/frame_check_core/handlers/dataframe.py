@@ -1,3 +1,5 @@
+import re
+
 from ..diagnostic import IllegalAccess
 from .models import (
     DF,
@@ -469,3 +471,31 @@ def df_reindex(
     if names is None or (isinstance(labels, list) and len(names) != len(labels)):
         return columns, None, None
     return columns, names, None
+
+
+@DF.register("filter")
+def df_filter(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, ("items", "like", "regex", "axis"))
+    axis = params.get("axis")
+    if axis in (0, "index", "rows"):
+        # Filters row labels
+        return columns, columns, None
+    if axis not in (None, 1, "columns"):
+        return columns, None, None
+
+    # Unknown labels in items= are skipped silently; like/regex are computed
+    # on the known columns (pandas uses `in` and re.search)
+    if (items := params.get("items")) is not None:
+        names = _column_labels(items)
+        return columns, (columns & names if names is not None else None), None
+    if isinstance(like := params.get("like"), str):
+        return columns, {c for c in columns if like in c}, None
+    if isinstance(regex := params.get("regex"), str):
+        try:
+            pattern = re.compile(regex)
+        except re.error:
+            return columns, None, None
+        return columns, {c for c in columns if pattern.search(c)}, None
+    return columns, None, None

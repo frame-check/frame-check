@@ -51,3 +51,28 @@ df["B"]
 
 def test_reindex_with_unresolved_labels_is_not_tracked():
     assert _checker_columns("df.reindex(columns=wanted)") is None
+
+
+FILTER_CASES = [
+    'df.filter(items=["A", "Q"])',
+    'df.filter(["B"])',
+    'df.filter(like="A")',
+    'df.filter(regex="^A")',
+    'df.filter(regex="B$")',
+    "df.filter(items=[0], axis=0)",
+    'df.filter(like="A", axis=1)',
+]
+
+
+@pytest.mark.support(code="#CRM-11")
+@pytest.mark.parametrize("expr", FILTER_CASES)
+def test_crm_11_filter_matches_pandas(expr: str):
+    assert _checker_columns(expr) == _pandas_columns(expr)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    ["df.filter(items=wanted)", "df.filter(regex=pattern)", 'df.filter(regex="[")'],
+)
+def test_unresolvable_filter_is_not_tracked(expr: str):
+    assert _checker_columns(expr) is None
