@@ -145,3 +145,60 @@ df['A']
     fc = Checker.check(code)
     assert "df" not in fc.dfs
     assert len(fc.diagnostics) == 0
+
+
+# --- EC-3: Set operations (df.columns = [...]) ---
+
+
+@pytest.mark.support(code="#EC-3")
+def test_ec_3_set_columns():
+    """df.columns = ['A', 'B', 'C'] replaces the schema."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'a': [1], 'b': [2], 'c': [3]})
+df.columns = ['A', 'B', 'C']
+df['A']
+df['a']
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 1
+    assert "Column 'a' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#EC-3-1")
+@pytest.mark.parametrize(
+    "value",
+    ["('A', 'B')", "names", "['x', 'y']"],
+)
+def test_ec_3_1_set_columns_from_tuple_or_variable(value: str):
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{'a': [1], 'b': [2]}})
+names = ('A', 'B')
+df.columns = {value}
+"""
+    fc = Checker.check(code)
+    expected = {"x", "y"} if "x" in value else {"A", "B"}
+    assert set(fc.dfs["df"].columns.keys()) == expected
+
+
+@pytest.mark.support(code="#EC-3-2")
+@pytest.mark.parametrize(
+    "value",
+    [
+        "df.columns.str.lower()",
+        "[c.upper() for c in df.columns]",
+        "load_names()",
+    ],
+)
+def test_ec_3_2_unresolvable_names_stop_tracking(value: str):
+    code = f"""
+import pandas as pd
+df = pd.DataFrame({{'a': [1], 'b': [2]}})
+df.columns = {value}
+df['A']
+"""
+    fc = Checker.check(code)
+    assert "df" not in fc.dfs
+    assert len(fc.diagnostics) == 0

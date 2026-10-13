@@ -190,6 +190,14 @@ def _root_name(expr: ast.expr) -> str | None:
                 return None
 
 
+def _columns_target(target: ast.expr) -> bool:
+    """Whether `target` is `df.columns`."""
+    match target:
+        case ast.Attribute(value=ast.Name(), attr="columns"):
+            return True
+    return False
+
+
 def _indexer_target(target: ast.expr) -> bool:
     """Whether `target` is `df.loc[rows, cols]` or `df.at[row, col]`."""
     match target:
@@ -845,6 +853,30 @@ class Checker(ast.NodeVisitor):
         elif not _references_name(col_selector, df_name):
             del self.dfs[df_name]
 
+    def _apply_columns_assignment(self, target: ast.expr, value: ast.expr) -> None:
+        """
+        Replace a frame's columns for `df.columns = [...]`.
+
+        Names that can't be resolved statically (`df.columns.str.lower()`,
+        a comprehension, ...) stop tracking the frame. A length mismatch
+        raises at runtime, but isn't reported: the tracked columns can be a
+        superset of the real ones, so the count isn't reliable.
+        """
+        if not isinstance(target, ast.Attribute) or not isinstance(
+            target.value, ast.Name
+        ):
+            return
+        df_name = target.value.id
+        tracker = self.dfs.get(df_name)
+        if tracker is None:
+            return
+
+        names = get_result(value, self.definitions)
+        if isinstance(names, list) and all(isinstance(n, str) for n in names):
+            tracker.set_columns({n for n in names if isinstance(n, str)})
+        else:
+            del self.dfs[df_name]
+
     def visit_Expr(self, node: ast.Expr) -> None:
         """
         Handle standalone expression statements.
@@ -883,6 +915,13 @@ class Checker(ast.NodeVisitor):
             self.generic_visit(node)
             for target in indexer_targets:
                 self._apply_indexer_assignment(target)
+            return
+
+        # Replacing the schema: df.columns = ["a", "b"]
+        if columns_targets := [t for t in node.targets if _columns_target(t)]:
+            self.generic_visit(node)
+            for target in columns_targets:
+                self._apply_columns_assignment(target, node.value)
             return
 
         # Try DataFrame creation first
