@@ -449,3 +449,23 @@ def df_reset_index(
     if inplace:
         return new_columns, None, None
     return columns, new_columns, None
+
+
+@DF.register("reindex")
+def df_reindex(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # The labels define the columns exactly; unknown ones become NaN columns
+    if "columns" in keywords:
+        labels = keywords["columns"]
+    else:
+        axis = keywords.get("axis")
+        if not (axis == 1 or axis == "columns"):
+            # Only the index is reindexed
+            return columns, columns, None
+        labels = idx_or_key(args, keywords, idx=0, key="labels")
+
+    names = _column_labels(labels)
+    if names is None or (isinstance(labels, list) and len(names) != len(labels)):
+        return columns, None, None
+    return columns, names, None
