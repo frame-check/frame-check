@@ -190,6 +190,17 @@ def _root_name(expr: ast.expr) -> str | None:
                 return None
 
 
+def _indexer_target(target: ast.expr) -> bool:
+    """Whether `target` is `df.loc[rows, cols]` or `df.at[row, col]`."""
+    match target:
+        case ast.Subscript(
+            value=ast.Attribute(value=ast.Name(), attr="loc" | "at"),
+            slice=ast.Tuple(elts=[_, _]),
+        ):
+            return True
+    return False
+
+
 def _references_name(node: ast.AST, name: str) -> bool:
     """Check whether `name` is used anywhere inside `node`."""
     return any(
@@ -803,6 +814,37 @@ class Checker(ast.NodeVisitor):
             self._eval_frame(node)
         self.generic_visit(node)
 
+    def _apply_indexer_assignment(self, target: ast.expr) -> None:
+        """
+        Add the columns created by `df.loc[rows, cols] = ...` or `df.at[i, col] = ...`.
+
+        pandas enlarges the frame with new column labels. A slice (`:`)
+        selects existing columns. A selector that can't be resolved may add
+        unknown columns, so the frame stops being tracked, unless it is
+        derived from the frame itself (e.g. a mask over `df.columns`).
+        """
+        match target:
+            case ast.Subscript(
+                value=ast.Attribute(value=ast.Name(id=df_name)),
+                slice=ast.Tuple(elts=[_, col_selector]),
+            ):
+                pass
+            case _:
+                return
+        tracker = self.dfs.get(df_name)
+        if tracker is None or isinstance(col_selector, ast.Slice):
+            return
+
+        labels = get_result(col_selector, self.definitions)
+        if isinstance(labels, str):
+            labels = [labels]
+        if isinstance(labels, list) and all(isinstance(c, str) for c in labels):
+            for column in labels:
+                if isinstance(column, str):
+                    tracker.try_add(column)
+        elif not _references_name(col_selector, df_name):
+            del self.dfs[df_name]
+
     def visit_Expr(self, node: ast.Expr) -> None:
         """
         Handle standalone expression statements.
@@ -835,6 +877,14 @@ class Checker(ast.NodeVisitor):
             `_skip_subscripts` to prevent duplicate diagnostics
             in `visit_Subscript`.
         """
+        # Label-based indexer assignment: df.loc[rows, "col"] = v, df.at[i, "col"] = v
+        if indexer_targets := [t for t in node.targets if _indexer_target(t)]:
+            # The right-hand side is evaluated before the column exists
+            self.generic_visit(node)
+            for target in indexer_targets:
+                self._apply_indexer_assignment(target)
+            return
+
         # Try DataFrame creation first
         if self._try_create_dataframe(node):
             self.generic_visit(node)
