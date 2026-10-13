@@ -174,8 +174,8 @@ supported = true
 title = "From dictionary"
 code = """df = pd.DataFrame({'A': [1,2], 'B': [3,4]})"""
 description = "Creates a DataFrame with the specified columns directly in the constructor."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_12]
 title = "concat"
@@ -223,29 +223,29 @@ supported = true
 title = "Copy from another column"
 code = """df['B'] = df['A'].copy()"""
 description = "Creates an explicit copy of another column."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_19]
 title = "Transform operations"
 code = """df['B'] = df['A'].apply(lambda x: x*2)"""
 description = "Creates columns from transformations applied to existing columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_20]
 title = "Expanding columns"
 code = """df[['A','B']] = df['combined'].str.split(expand=True)"""
 description = "Creates multiple columns from string operations that expand data."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_21]
 title = "From groupby"
 code = """df['new'] = df.groupby('A')['B'].transform('mean')"""
 description = "Creates columns containing aggregated results broadcast back to the original DataFrame's shape."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_22]
 title = "From pivot"
@@ -272,8 +272,8 @@ supported = false
 title = "Update method"
 code = """df.update(other_df[['A']])"""
 description = "Updates existing columns with values from another DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods]
 
@@ -395,15 +395,15 @@ supported = true
 title = "Arithmetic operations"
 code = """df['C'] = df['A'] + df['B']"""
 description = "Creates new columns through arithmetic operations on existing columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_5]
 title = "String accessor"
 code = """df[['first', 'last']] = df['name'].str.split(expand=True)"""
 description = "Expands string content into multiple new columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_6]
 title = "JSON normalization"
@@ -437,5 +437,5 @@ supported = false
 title = "Column assignment in chain"
 code = """df.assign(B=1).assign(C=lambda x: x['B']*2)"""
 description = "Creates columns that depend on columns created earlier in the same chain."
-tested = false
-supported = false
+tested = true
+supported = true
