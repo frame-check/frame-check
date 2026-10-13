@@ -4,6 +4,18 @@ from .models import DF, PD, UNPACKED, PDFuncResult, Result, idx_or_key
 
 @PD.register("DataFrame")
 def pd_dataframe(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    # columns= defines the result exactly, whatever the data: it names the
+    # columns of list/array data and selects (or adds as NaN) for dicts/frames
+    if len(args) > 2 or "columns" in keywords:
+        columns_arg = idx_or_key(args, keywords, idx=2, key="columns")
+        if columns_arg is not None:
+            labels = _string_list(columns_arg)
+            return (set(labels) if labels is not None else None), None
+
+    if not args and "data" not in keywords:
+        # pd.DataFrame() / pd.DataFrame(index=[...]): no columns yet
+        return set(), None
+
     data = idx_or_key(args, keywords, idx=0, key="data")
     match data:
         case DF():
@@ -100,3 +112,12 @@ def pd_concat(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
             return None, None
         return set.union(*frames), None
     return None, None
+
+
+def _string_list(value: Result) -> list[str] | None:
+    """Return `value` as a list of column names if it is one, else None."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return [v for v in value if isinstance(v, str)]
+    return None
