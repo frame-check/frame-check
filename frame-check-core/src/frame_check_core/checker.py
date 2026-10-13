@@ -525,7 +525,14 @@ class Checker(ast.NodeVisitor):
     def _is_pandas_call(self, expr: ast.expr) -> bool:
         """Whether `expr` is a call like `pd.read_csv(...)`."""
         match expr:
-            case ast.Call(func=ast.Attribute(value=ast.Name(id=module_name))):
+            case ast.Call(
+                func=ast.Attribute(value=ast.Name(id=module_name))
+                | ast.Attribute(
+                    value=ast.Attribute(
+                        value=ast.Name(id=module_name), attr="DataFrame"
+                    )
+                )
+            ):
                 return module_name in self.pandas_aliases
         return False
 
@@ -653,6 +660,20 @@ class Checker(ast.NodeVisitor):
                 if columns is None:
                     return None
                 return f"{module_name}.{function_name}(...)", columns
+            case ast.Call(
+                func=ast.Attribute(
+                    value=ast.Attribute(
+                        value=ast.Name(id=module_name), attr="DataFrame"
+                    ),
+                    attr=constructor,
+                )
+            ) if module_name in self.pandas_aliases:
+                # pd.DataFrame.from_dict(...), pd.DataFrame.from_records(...)
+                name = f"DataFrame.{constructor}"
+                columns = self._call_pandas(expr, f"{module_name}.{name}", name)
+                if columns is None:
+                    return None
+                return f"{module_name}.{name}(...)", columns
             case ast.Call(func=ast.Attribute(value=inner, attr=method_name)):
                 frame = self._eval_frame(inner)
                 if frame is None:

@@ -276,3 +276,69 @@ def test_dcms_3_dictionary_of_series():
 
 def test_unresolved_columns_argument_is_not_tracked():
     assert _checker_columns("pd.DataFrame([[1]], columns=names)") is None
+
+
+FROM_CASES = [
+    pytest.param('pd.DataFrame.from_dict({"c1": [1], "c2": [2]})', id="from_dict"),
+    pytest.param(
+        'pd.DataFrame.from_dict({"r1": [1, 2]}, orient="index", columns=["c1", "c2"])',
+        id="from_dict-index",
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([("a", 1)], columns=["c1", "c2"])',
+        id="from_records",
+    ),
+    pytest.param('pd.DataFrame.from_records([{"a": 1, "b": 2}])', id="records-dicts"),
+    pytest.param(
+        'pd.DataFrame.from_records([{"a": 1, "b": 2}], exclude=["b"])', id="exclude"
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([{"a": 1, "b": 2}], index="a")', id="index"
+    ),
+    pytest.param(
+        'pd.DataFrame.from_records([("x", 1)], columns=["c1", "c2"], index="c1")',
+        id="index-columns",
+    ),
+]
+
+
+@pytest.mark.parametrize("expr", FROM_CASES)
+def test_from_constructors_match_pandas(expr: str):
+    assert _checker_columns(expr) == _pandas_columns(expr)
+
+
+@pytest.mark.support(code="#DCMS-15")
+def test_dcms_15_from_records():
+    """pd.DataFrame.from_records([('a', 1), ('b', 2)], columns=['col1', 'col2'])"""
+    expr = "pd.DataFrame.from_records([('a', 1), ('b', 2)], columns=['col1', 'col2'])"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.support(code="#DCMS-16")
+def test_dcms_16_from_dict():
+    """pd.DataFrame.from_dict({'col1': [1, 2], 'col2': [3, 4]})"""
+    expr = "pd.DataFrame.from_dict({'col1': [1, 2], 'col2': [3, 4]})"
+    assert _checker_columns(expr) == {"col1", "col2"}
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        'pd.DataFrame.from_dict({"r1": [1, 2]}, orient="index")',
+        "pd.DataFrame.from_dict(data)",
+        "pd.DataFrame.from_records(rows)",
+    ],
+)
+def test_unresolved_from_constructors_are_not_tracked(expr: str):
+    assert _checker_columns(expr) is None
+
+
+def test_read_on_from_dict_is_checked():
+    code = """
+import pandas as pd
+df = pd.DataFrame.from_dict({"c1": [1]})
+df["c2"]
+"""
+    fc = Checker.check(code)
+    assert len(fc.diagnostics) == 1
+    assert "Column 'c2' does not exist on DataFrame 'df'." in fc.diagnostics[0].message

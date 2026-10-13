@@ -121,3 +121,55 @@ def _string_list(value: Result) -> list[str] | None:
     if isinstance(value, list) and all(isinstance(v, str) for v in value):
         return [v for v in value if isinstance(v, str)]
     return None
+
+
+@PD.register("DataFrame.from_dict")
+def pd_dataframe_from_dict(
+    args: list[Result], keywords: dict[str, Result]
+) -> PDFuncResult:
+    """Handle pd.DataFrame.from_dict(data, orient="columns", dtype, columns)."""
+    data = idx_or_key(args, keywords, idx=0, key="data")
+    given = "orient" in keywords or len(args) > 1
+    orient = idx_or_key(args, keywords, idx=1, key="orient") if given else "columns"
+    if orient == "columns" and isinstance(data, dict):
+        return {k for k in data if isinstance(k, str)}, None
+    if orient == "index":
+        # Keys become the index; columns come from columns= if given
+        labels = _string_list(idx_or_key(args, keywords, idx=3, key="columns"))
+        return (set(labels) if labels is not None else None), None
+    return None, None
+
+
+@PD.register("DataFrame.from_records")
+def pd_dataframe_from_records(
+    args: list[Result], keywords: dict[str, Result]
+) -> PDFuncResult:
+    """Handle pd.DataFrame.from_records(data, index, exclude, columns, ...)."""
+    data = idx_or_key(args, keywords, idx=0, key="data")
+    if "columns" in keywords or len(args) > 3:
+        labels = _string_list(idx_or_key(args, keywords, idx=3, key="columns"))
+        if labels is None:
+            return None, None
+        columns = set(labels)
+    elif isinstance(data, list) and data and all(isinstance(r, dict) for r in data):
+        columns = {
+            k
+            for row in data
+            if isinstance(row, dict)
+            for k in row
+            if isinstance(k, str)
+        }
+    else:
+        return None, None
+
+    for key, idx in (("exclude", 2), ("index", 1)):
+        if key in keywords or len(args) > idx:
+            value = idx_or_key(args, keywords, idx=idx, key=key)
+            if value is None:
+                continue
+            # exclude= drops columns; index= moves a column into the index
+            labels = _string_list(value)
+            if labels is None:
+                return None, None
+            columns -= set(labels)
+    return columns, None
