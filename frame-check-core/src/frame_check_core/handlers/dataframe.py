@@ -499,3 +499,20 @@ def df_filter(
             return columns, None, None
         return columns, {c for c in columns if pattern.search(c)}, None
     return columns, None, None
+
+
+@DF.register("groupby")
+def df_groupby(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Returns a GroupBy, not a frame. String keys must be columns (KeyError);
+    # other keys (Series, functions, level=) aren't checked.
+    by = idx_or_key(args, keywords, idx=0, key="by")
+    if isinstance(by, str):
+        by = [by]
+    error = None
+    if isinstance(by, list) and keywords.get("level") is None:
+        keys = {key for key in by if isinstance(key, str)}
+        if missing := keys - columns:
+            error = IllegalAccess(missing=sorted(missing))
+    return columns, None, error

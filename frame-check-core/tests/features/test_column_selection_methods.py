@@ -76,3 +76,39 @@ def test_crm_11_filter_matches_pandas(expr: str):
 )
 def test_unresolvable_filter_is_not_tracked(expr: str):
     assert _checker_columns(expr) is None
+
+
+@pytest.mark.parametrize(
+    ("call", "missing"),
+    [
+        ('df.groupby("Z").sum()', "'Z'"),
+        ('df.groupby(["A", "Z"]).sum()', "'Z'"),
+        ('df.groupby(by="Z")["A"].mean()', "'Z'"),
+    ],
+)
+def test_groupby_with_missing_key_is_reported(call: str, missing: str):
+    with pytest.raises(KeyError):
+        eval(call, {"df": pd.DataFrame({"A": [1], "B": [2]})})
+    fc = Checker.check(
+        f'import pandas as pd\ndf = pd.DataFrame({{"A": [1], "B": [2]}})\nx = {call}\n'
+    )
+    assert len(fc.diagnostics) == 1
+    assert f"column {missing} does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        'df.groupby("A").sum()',
+        'df.groupby(["A", df["B"]]).sum()',
+        "df.groupby(level=0).sum()",
+        "df.groupby(key_func).sum()",
+        'df["C"] = df.groupby("A")["B"].transform("mean")',
+    ],
+)
+def test_groupby_valid_keys_are_not_reported(call: str):
+    stmt = call if call.startswith("df[") else f"x = {call}"
+    fc = Checker.check(
+        f'import pandas as pd\ndf = pd.DataFrame({{"A": [1], "B": [2]}})\n{stmt}\n'
+    )
+    assert fc.diagnostics == []
