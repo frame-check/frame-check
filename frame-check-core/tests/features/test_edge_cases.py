@@ -202,3 +202,57 @@ df['A']
     fc = Checker.check(code)
     assert "df" not in fc.dfs
     assert len(fc.diagnostics) == 0
+
+
+# --- EC-4: Arithmetic operations ---
+
+
+@pytest.mark.support(code="#EC-4")
+def test_ec_4_arithmetic_operations():
+    """df['C'] = df['A'] + df['B'] checks both operands."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1], 'B': [2]})
+df['C'] = df['A'] + df['B']
+df['D'] = df['A'] * df['Z']
+df['C']
+"""
+    fc = Checker.check(code)
+    assert fc.dfs["df"].columns["C"] == {"A", "B"}
+    assert len(fc.diagnostics) == 1
+    assert "column 'Z' does not exist" in fc.diagnostics[0].message
+
+
+# --- EC-5: String accessor ---
+
+
+@pytest.mark.support(code="#EC-5")
+def test_ec_5_string_accessor():
+    """df[['first', 'last']] = df['name'].str.split(expand=True)"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'name': ['Ada Lovelace']})
+df[['first', 'last']] = df['name'].str.split(expand=True)
+df['first']
+df['last']
+"""
+    fc = Checker.check(code)
+    assert {"first", "last"} <= set(fc.dfs["df"].columns.keys())
+    assert len(fc.diagnostics) == 0
+
+
+# --- EC-10: Column assignment in chain ---
+
+
+@pytest.mark.support(code="#EC-10")
+def test_ec_10_column_assignment_in_chain():
+    """df.assign(B=1).assign(C=lambda x: x['B']*2)"""
+    code = """
+import pandas as pd
+df = pd.DataFrame({'A': [1]})
+df = df.assign(B=1).assign(C=lambda x: x['B'] * 2)
+df['C']
+"""
+    fc = Checker.check(code)
+    assert set(fc.dfs["df"].columns.keys()) == {"A", "B", "C"}
+    assert len(fc.diagnostics) == 0

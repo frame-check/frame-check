@@ -138,21 +138,27 @@ Each component should then have a README.md file with instructions on how to run
 
 ### column_assignment_methods
 
-| id                        | title                  | code                                       | description                                                                                                                         | supported   |
-|:--------------------------|:-----------------------|:-------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:------------|
-| <a id="CAM-1"></a>CAM-1   | Direct Assignment      | df["c"] = [7, 8, 9]                        | The most common method for assigning values to a column. If the column doesn't exist, it creates a new one.                         | ✅          |
-| <a id="CAM-2"></a>CAM-2   | Attribute Assignment   | df.col = value                             | Only updates an existing column. Assigning a new attribute name does not create a column (pandas warns and sets a plain attribute). | ✅          |
-| <a id="CAM-3"></a>CAM-3   | Loc Indexer            | df.loc[:, 'col'] = value                   | Label-based column assignment that can assign to slices or selections of rows.                                                      | ✅          |
-| <a id="CAM-5"></a>CAM-5   | At Indexer             | df.at[row, 'col'] = value                  | For single cell assignment based on labels. Faster than loc for single-cell operations.                                             | ✅          |
-| <a id="CAM-7"></a>CAM-7   | Assign Method          | df = df.assign(A=[1, 2, 3])                | Returns a new DataFrame with the column added or modified. Great for method chaining.                                               | ✅          |
-| <a id="CAM-8"></a>CAM-8   | Multiple Assign        | df = df.assign(B=1, C=2)                   | Creates multiple columns at once using keyword arguments.                                                                           | ✅          |
-| <a id="CAM-9"></a>CAM-9   | Insert Method          | df.insert(0, "A", [1, 2, 3])               | Inserts a column at a specific position in the DataFrame. Modifies in place.                                                        | ✅          |
-| <a id="CAM-10"></a>CAM-10 | Setitem With List      | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]] | Assigns multiple columns at once, either from other columns or external values.                                                     | ✅          |
-| <a id="CAM-12"></a>CAM-12 | Concat                 | df = pd.concat([df, new_df], axis=1)       | Combines columns from two DataFrames through horizontal concatenation.                                                              | ✅          |
-| <a id="CAM-13"></a>CAM-13 | Join                   | df = df.join(other_df)                     | Adds columns from another DataFrame based on index alignment.                                                                       | ✅          |
-| <a id="CAM-14"></a>CAM-14 | Merge                  | df = df.merge(df2, on='key')               | Adds columns through merging DataFrames on common columns or indices.                                                               | ✅          |
-| <a id="CAM-16"></a>CAM-16 | From Query Results     | df['new'] = df.query('A > 0')['B']         | Assigns values from a filtered subset of another column.                                                                            | ✅          |
-| <a id="CAM-17"></a>CAM-17 | Conditional Assignment | df.loc[df['A'] > 0, 'B'] = 1               | Updates columns only for rows matching a condition.                                                                                 | ✅          |
+| id                        | title                    | code                                                  | description                                                                                                                         | supported   |
+|:--------------------------|:-------------------------|:------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------|:------------|
+| <a id="CAM-1"></a>CAM-1   | Direct Assignment        | df["c"] = [7, 8, 9]                                   | The most common method for assigning values to a column. If the column doesn't exist, it creates a new one.                         | ✅          |
+| <a id="CAM-2"></a>CAM-2   | Attribute Assignment     | df.col = value                                        | Only updates an existing column. Assigning a new attribute name does not create a column (pandas warns and sets a plain attribute). | ✅          |
+| <a id="CAM-3"></a>CAM-3   | Loc Indexer              | df.loc[:, 'col'] = value                              | Label-based column assignment that can assign to slices or selections of rows.                                                      | ✅          |
+| <a id="CAM-5"></a>CAM-5   | At Indexer               | df.at[row, 'col'] = value                             | For single cell assignment based on labels. Faster than loc for single-cell operations.                                             | ✅          |
+| <a id="CAM-7"></a>CAM-7   | Assign Method            | df = df.assign(A=[1, 2, 3])                           | Returns a new DataFrame with the column added or modified. Great for method chaining.                                               | ✅          |
+| <a id="CAM-8"></a>CAM-8   | Multiple Assign          | df = df.assign(B=1, C=2)                              | Creates multiple columns at once using keyword arguments.                                                                           | ✅          |
+| <a id="CAM-9"></a>CAM-9   | Insert Method            | df.insert(0, "A", [1, 2, 3])                          | Inserts a column at a specific position in the DataFrame. Modifies in place.                                                        | ✅          |
+| <a id="CAM-10"></a>CAM-10 | Setitem With List        | df[["c", "d"]] = [[7, 8, 9], [10, 11, 12]]            | Assigns multiple columns at once, either from other columns or external values.                                                     | ✅          |
+| <a id="CAM-11"></a>CAM-11 | From Dictionary          | df = pd.DataFrame({'A': [1,2], 'B': [3,4]})           | Creates a DataFrame with the specified columns directly in the constructor.                                                         | ✅          |
+| <a id="CAM-12"></a>CAM-12 | Concat                   | df = pd.concat([df, new_df], axis=1)                  | Combines columns from two DataFrames through horizontal concatenation.                                                              | ✅          |
+| <a id="CAM-13"></a>CAM-13 | Join                     | df = df.join(other_df)                                | Adds columns from another DataFrame based on index alignment.                                                                       | ✅          |
+| <a id="CAM-14"></a>CAM-14 | Merge                    | df = df.merge(df2, on='key')                          | Adds columns through merging DataFrames on common columns or indices.                                                               | ✅          |
+| <a id="CAM-16"></a>CAM-16 | From Query Results       | df['new'] = df.query('A > 0')['B']                    | Assigns values from a filtered subset of another column.                                                                            | ✅          |
+| <a id="CAM-17"></a>CAM-17 | Conditional Assignment   | df.loc[df['A'] > 0, 'B'] = 1                          | Updates columns only for rows matching a condition.                                                                                 | ✅          |
+| <a id="CAM-18"></a>CAM-18 | Copy From Another Column | df['B'] = df['A'].copy()                              | Creates an explicit copy of another column.                                                                                         | ✅          |
+| <a id="CAM-19"></a>CAM-19 | Transform Operations     | df['B'] = df['A'].apply(lambda x: x*2)                | Creates columns from transformations applied to existing columns.                                                                   | ✅          |
+| <a id="CAM-20"></a>CAM-20 | Expanding Columns        | df[['A','B']] = df['combined'].str.split(expand=True) | Creates multiple columns from string operations that expand data.                                                                   | ✅          |
+| <a id="CAM-21"></a>CAM-21 | From Groupby             | df['new'] = df.groupby('A')['B'].transform('mean')    | Creates columns containing aggregated results broadcast back to the original DataFrame's shape.                                     | ✅          |
+| <a id="CAM-25"></a>CAM-25 | Update Method            | df.update(other_df[['A']])                            | Updates existing columns with values from another DataFrame.                                                                        | ✅          |
 
 ### column_removal_methods
 
@@ -169,10 +175,13 @@ Each component should then have a README.md file with instructions on how to run
 
 ### edge_cases
 
-| id                    | title             | code                                   | description                                                       | supported   |
-|:----------------------|:------------------|:---------------------------------------|:------------------------------------------------------------------|:------------|
-| <a id="EC-2"></a>EC-2 | Rename Operations | df = df.rename(columns={'old': 'new'}) | Changes column names while preserving their data and position.    | ✅          |
-| <a id="EC-3"></a>EC-3 | Set Operations    | df.columns = ['A', 'B', 'C']           | Completely replaces the column structure with a new set of names. | ✅          |
+| id                      | title                      | code                                                      | description                                                               | supported   |
+|:------------------------|:---------------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------|:------------|
+| <a id="EC-2"></a>EC-2   | Rename Operations          | df = df.rename(columns={'old': 'new'})                    | Changes column names while preserving their data and position.            | ✅          |
+| <a id="EC-3"></a>EC-3   | Set Operations             | df.columns = ['A', 'B', 'C']                              | Completely replaces the column structure with a new set of names.         | ✅          |
+| <a id="EC-4"></a>EC-4   | Arithmetic Operations      | df['C'] = df['A'] + df['B']                               | Creates new columns through arithmetic operations on existing columns.    | ✅          |
+| <a id="EC-5"></a>EC-5   | String Accessor            | df[['first', 'last']] = df['name'].str.split(expand=True) | Expands string content into multiple new columns.                         | ✅          |
+| <a id="EC-10"></a>EC-10 | Column Assignment In Chain | df.assign(B=1).assign(C=lambda x: x['B']*2)               | Creates columns that depend on columns created earlier in the same chain. | ✅          |
 
 Note: the full list of supported features can be found [here](https://frame-check.github.io/frame-check/features/).
 

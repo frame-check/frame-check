@@ -309,3 +309,97 @@ df["d"]
     assert df is not None
     assert sorted(df.columns.keys()) == ["a", "b", "c", "d"]
     assert len(fc.diagnostics) == 0
+
+
+# --- Features that need no special handling ---
+# Assigning any right-hand side to df["col"] adds the column, and the
+# columns read on the right-hand side are still checked.
+
+SOURCE = """
+import pandas as pd
+df = pd.DataFrame({"A": [1, 2], "B": [3, 4], "combined": ["x y", "z w"]})
+other_df = pd.DataFrame({"A": [5, 6]})
+"""
+
+
+@pytest.mark.support(code="#CAM-11")
+def test_cam_11_from_dictionary():
+    """df = pd.DataFrame({'A': [1,2], 'B': [3,4]})"""
+    fc = Checker.check(SOURCE + 'df["A"]\ndf["B"]\n')
+    assert {"A", "B"} <= set(fc.dfs["df"].columns)
+    assert fc.diagnostics == []
+
+
+@pytest.mark.parametrize(
+    ("code", "new_columns"),
+    [
+        pytest.param('df["C"] = df["A"].copy()', {"C"}, id="CAM-18"),
+        pytest.param('df["C"] = df["A"].apply(lambda x: x * 2)', {"C"}, id="CAM-19"),
+        pytest.param(
+            'df[["first", "last"]] = df["combined"].str.split(expand=True)',
+            {"first", "last"},
+            id="CAM-20",
+        ),
+        pytest.param(
+            'df["C"] = df.groupby("A")["B"].transform("mean")', {"C"}, id="CAM-21"
+        ),
+    ],
+)
+def test_assignment_from_derived_series(code: str, new_columns: set[str]):
+    fc = Checker.check(
+        SOURCE + code + "\n" + "".join(f'df["{c}"]\n' for c in new_columns)
+    )
+    assert new_columns <= set(fc.dfs["df"].columns)
+    assert fc.diagnostics == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'df["C"] = df["Z"].copy()',
+        'df["C"] = df["Z"].apply(lambda x: x * 2)',
+        'df[["first", "last"]] = df["Z"].str.split(expand=True)',
+    ],
+)
+def test_assignment_from_derived_series_checks_its_source(code: str):
+    fc = Checker.check(SOURCE + code + "\n")
+    assert len(fc.diagnostics) == 1
+    assert "'Z' does not exist" in fc.diagnostics[0].message
+
+
+@pytest.mark.support(code="#CAM-18")
+def test_cam_18_copy_from_another_column():
+    """df['B'] = df['A'].copy()"""
+    fc = Checker.check(SOURCE + 'df["C"] = df["A"].copy()\ndf["C"]\n')
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#CAM-19")
+def test_cam_19_transform_with_apply():
+    """df['B'] = df['A'].apply(lambda x: x*2)"""
+    fc = Checker.check(SOURCE + 'df["C"] = df["A"].apply(lambda x: x * 2)\ndf["C"]\n')
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#CAM-20")
+def test_cam_20_expanding_columns():
+    """df[['A','B']] = df['combined'].str.split(expand=True)"""
+    code = 'df[["first", "last"]] = df["combined"].str.split(expand=True)\n'
+    fc = Checker.check(SOURCE + code + 'df["last"]\n')
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#CAM-21")
+def test_cam_21_from_groupby():
+    """df['new'] = df.groupby('A')['B'].transform('mean')"""
+    code = 'df["new"] = df.groupby("A")["B"].transform("mean")\ndf["new"]\n'
+    fc = Checker.check(SOURCE + code)
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#CAM-25")
+def test_cam_25_update_method():
+    """df.update(other_df[['A']]) changes values, not columns."""
+    fc = Checker.check(SOURCE + 'df.update(other_df[["A"]])\ndf["A"]\n')
+    assert set(fc.dfs["df"].columns) == {"A", "B", "combined"}
+    assert fc.diagnostics == []
