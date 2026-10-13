@@ -62,3 +62,17 @@ def test_global_frame_mutated_in_function_merges_columns():
     code = HEADER + 'def add():\n    df["X"] = df["A"]\n'
     fc = Checker.check(code)
     assert set(fc.dfs["df"].columns) == {"A", "X"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "def f():\n    df.columns = load_names()\n",
+        "def f():\n    df.rename(columns=str.upper, inplace=True)\n",
+    ],
+)
+def test_unknown_in_place_change_in_function_stops_tracking(body: str):
+    """A function may change the frame in ways we can't follow."""
+    fc = Checker.check(HEADER + body + 'f()\nprint(df["A_NEW"])\n')
+    assert "df" not in fc.dfs
+    assert fc.diagnostics == []

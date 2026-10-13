@@ -81,9 +81,9 @@ def _parameter_names(args: ast.arguments) -> set[str]:
 
 def _function_locals(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> tuple[set[str], set[str]]:
+) -> set[str]:
     """
-    Return the names local to a function, and those declared global/nonlocal.
+    Return the names local to a function (excluding global/nonlocal ones).
 
     Only statements can bind names in a function body (walrus targets
     aside), so walking statement blocks is enough and much cheaper than
@@ -92,7 +92,7 @@ def _function_locals(
     local_names = _parameter_names(node.args)
     declared: set[str] = set()
     _collect_bound_names(node.body, local_names, declared)
-    return local_names - declared, declared
+    return local_names - declared
 
 
 def _collect_bound_names(
@@ -188,6 +188,25 @@ def _root_name(expr: ast.expr) -> str | None:
                 return name
             case _:
                 return None
+
+
+def _columns_target(target: ast.expr) -> bool:
+    """Whether `target` is `df.columns`."""
+    match target:
+        case ast.Attribute(value=ast.Name(), attr="columns"):
+            return True
+    return False
+
+
+def _indexer_target(target: ast.expr) -> bool:
+    """Whether `target` is `df.loc[rows, cols]` or `df.at[row, col]`."""
+    match target:
+        case ast.Subscript(
+            value=ast.Attribute(value=ast.Name(), attr="loc" | "at"),
+            slice=ast.Tuple(elts=[_, _]),
+        ):
+            return True
+    return False
 
 
 def _references_name(node: ast.AST, name: str) -> bool:
@@ -340,8 +359,7 @@ class Checker(ast.NodeVisitor):
             node: The function definition AST node.
         """
         self._bound.add(node.name)
-        local_names, declared = _function_locals(node)
-        self._visit_scope(node, local_names, deferred=True, declared=declared)
+        self._visit_scope(node, _function_locals(node), deferred=True)
 
     visit_AsyncFunctionDef = visit_FunctionDef
 
@@ -372,7 +390,6 @@ class Checker(ast.NodeVisitor):
         local_names: set[str],
         *,
         deferred: bool,
-        declared: set[str] | frozenset[str] = frozenset(),
     ) -> None:
         """
         Visit `node` in a nested scope where `local_names` shadow outer frames.
@@ -384,7 +401,6 @@ class Checker(ast.NodeVisitor):
                 so, enclosing frames are visible as quiet copies, and columns
                 the scope may add are merged into them afterwards. Otherwise
                 (lambdas, comprehensions) they are checked as usual.
-            declared: Names declared `global`/`nonlocal` in the scope.
         """
         saved_dfs, saved_definitions, saved_quiet = (
             self.dfs,
@@ -417,9 +433,9 @@ class Checker(ast.NodeVisitor):
         # the enclosing frame is a superset of what it may be after a call.
         for name, copy in copies.items():
             if inner_dfs.get(name) is not copy:
-                # Rebound through a global/nonlocal declaration: unknown now
-                if name in declared:
-                    saved_dfs.pop(name, None)
+                # Rebound through `global`, or changed in place in a way we
+                # can't follow (e.g. df.columns = load()): unknown now
+                saved_dfs.pop(name, None)
                 continue
             outer = saved_dfs[name]
             for column in copy.columns.keys() - outer.columns.keys():
@@ -803,6 +819,61 @@ class Checker(ast.NodeVisitor):
             self._eval_frame(node)
         self.generic_visit(node)
 
+    def _apply_indexer_assignment(self, target: ast.expr) -> None:
+        """
+        Add the columns created by `df.loc[rows, cols] = ...` or `df.at[i, col] = ...`.
+
+        pandas enlarges the frame with new column labels. A slice (`:`)
+        selects existing columns. A selector that can't be resolved may add
+        unknown columns, so the frame stops being tracked, unless it is
+        derived from the frame itself (e.g. a mask over `df.columns`).
+        """
+        match target:
+            case ast.Subscript(
+                value=ast.Attribute(value=ast.Name(id=df_name)),
+                slice=ast.Tuple(elts=[_, col_selector]),
+            ):
+                pass
+            case _:
+                return
+        tracker = self.dfs.get(df_name)
+        if tracker is None or isinstance(col_selector, ast.Slice):
+            return
+
+        labels = get_result(col_selector, self.definitions)
+        if isinstance(labels, str):
+            labels = [labels]
+        if isinstance(labels, list) and all(isinstance(c, str) for c in labels):
+            for column in labels:
+                if isinstance(column, str):
+                    tracker.try_add(column)
+        elif not _references_name(col_selector, df_name):
+            del self.dfs[df_name]
+
+    def _apply_columns_assignment(self, target: ast.expr, value: ast.expr) -> None:
+        """
+        Replace a frame's columns for `df.columns = [...]`.
+
+        Names that can't be resolved statically (`df.columns.str.lower()`,
+        a comprehension, ...) stop tracking the frame. A length mismatch
+        raises at runtime, but isn't reported: the tracked columns can be a
+        superset of the real ones, so the count isn't reliable.
+        """
+        if not isinstance(target, ast.Attribute) or not isinstance(
+            target.value, ast.Name
+        ):
+            return
+        df_name = target.value.id
+        tracker = self.dfs.get(df_name)
+        if tracker is None:
+            return
+
+        names = get_result(value, self.definitions)
+        if isinstance(names, list) and all(isinstance(n, str) for n in names):
+            tracker.set_columns({n for n in names if isinstance(n, str)})
+        else:
+            del self.dfs[df_name]
+
     def visit_Expr(self, node: ast.Expr) -> None:
         """
         Handle standalone expression statements.
@@ -835,6 +906,21 @@ class Checker(ast.NodeVisitor):
             `_skip_subscripts` to prevent duplicate diagnostics
             in `visit_Subscript`.
         """
+        # Label-based indexer assignment: df.loc[rows, "col"] = v, df.at[i, "col"] = v
+        if indexer_targets := [t for t in node.targets if _indexer_target(t)]:
+            # The right-hand side is evaluated before the column exists
+            self.generic_visit(node)
+            for target in indexer_targets:
+                self._apply_indexer_assignment(target)
+            return
+
+        # Replacing the schema: df.columns = ["a", "b"]
+        if columns_targets := [t for t in node.targets if _columns_target(t)]:
+            self.generic_visit(node)
+            for target in columns_targets:
+                self._apply_columns_assignment(target, node.value)
+            return
+
         # Try DataFrame creation first
         if self._try_create_dataframe(node):
             self.generic_visit(node)

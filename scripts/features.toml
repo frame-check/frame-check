@@ -118,8 +118,8 @@ supported = true
 title = "loc indexer"
 code = """df.loc[:, 'col'] = value"""
 description = "Label-based column assignment that can assign to slices or selections of rows."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_4]
 title = "iloc indexer"
@@ -132,8 +132,8 @@ supported = false
 title = "at indexer"
 code = """df.at[row, 'col'] = value"""
 description = "For single cell assignment based on labels. Faster than loc for single-cell operations."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_6]
 title = "iat indexer"
@@ -216,8 +216,8 @@ supported = true
 title = "Conditional assignment"
 code = """df.loc[df['A'] > 0, 'B'] = 1"""
 description = "Updates columns only for rows matching a condition."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_18]
 title = "Copy from another column"
@@ -388,8 +388,8 @@ supported = true
 title = "Set operations"
 code = """df.columns = ['A', 'B', 'C']"""
 description = "Completely replaces the column structure with a new set of names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_4]
 title = "Arithmetic operations"
