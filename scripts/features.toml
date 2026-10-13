@@ -18,22 +18,22 @@ supported = true
 title = "Dictionary of Series"
 code = """pd.DataFrame({'col1': pd.Series([1, 2]), 'col2': pd.Series([3, 4])})"""
 description = "Similar to dictionary of lists, but uses pandas Series objects instead."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_4]
 title = "NumPy Array"
 code = """pd.DataFrame(np.array([[1, 2], [3, 4]]), columns=['col1', 'col2'])"""
 description = "Creates a DataFrame from a NumPy array with explicitly defined column names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_5]
 title = "List of Lists"
 code = """pd.DataFrame([[1, 2], [3, 4]], columns=['col1', 'col2'])"""
 description = "Creates a DataFrame where each inner list represents a row, with column names provided separately."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_6]
 title = "From CSV"
@@ -67,15 +67,15 @@ supported = true
 title = "From Index"
 code = """pd.DataFrame(index=['a', 'b'], columns=['col1', 'col2'])"""
 description = "Creates an empty DataFrame with specified index and columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_13]
 title = "From Scalar"
 code = """pd.DataFrame({'col1': 1}, index=[0, 1, 2])"""
 description = "Creates a DataFrame by broadcasting scalar values across specified indices."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_14]
 title = "Copy Constructor"
@@ -88,15 +88,15 @@ supported = true
 title = "From Records"
 code = """pd.DataFrame.from_records([('a', 1), ('b', 2)], columns=['col1', 'col2'])"""
 description = "Creates a DataFrame from a structured array, records, or sequence of tuples."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [dataframe_creation_methods.dcms_16]
 title = "From Dict"
 code = """pd.DataFrame.from_dict({'col1': [1, 2], 'col2': [3, 4]})"""
 description = "Creates a DataFrame from a dictionary using the class method."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods]
 
@@ -125,8 +125,8 @@ supported = true
 title = "iloc indexer"
 code = """df.iloc[:, index] = value"""
 description = "Position-based assignment that uses integer indices instead of column labels."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_5]
 title = "at indexer"
@@ -139,8 +139,8 @@ supported = true
 title = "iat indexer"
 code = """df.iat[row, col_idx] = value"""
 description = "Single cell assignment by position. Faster than iloc for single-cell operations."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_7]
 title = "assign method"
@@ -351,8 +351,8 @@ supported = false
 title = "filter method"
 code = """df = df.filter(regex='^[AB]')"""
 description = "Keeps columns that match certain patterns, removing all others."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_removal_methods.crm_12]
 title = "drop_duplicates"
@@ -365,8 +365,8 @@ supported = false
 title = "reindex"
 code = """df = df.reindex(columns=['A','B'])"""
 description = "Keeps only specified columns and reorders them, removing all others."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases]
 
