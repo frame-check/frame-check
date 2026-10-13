@@ -819,6 +819,39 @@ class Checker(ast.NodeVisitor):
             self._eval_frame(node)
         self.generic_visit(node)
 
+    def _apply_dynamic_column_assignment(self, target: ast.expr) -> None:
+        """
+        Handle `df[key] = ...` where `key` isn't a literal label.
+
+        A key that resolves to labels through definitions (`name = "x"`)
+        adds them. A key derived from the frame itself (a boolean row mask
+        like `df[df["A"] > 0] = 0`) adds no columns. Any other key (a loop
+        variable, a call) may add any column, so the frame stops being
+        tracked.
+        """
+        match target:
+            case ast.Subscript(value=ast.Name(id=df_name), slice=key):
+                pass
+            case _:
+                return
+        tracker = self.dfs.get(df_name)
+        if tracker is None:
+            return
+
+        labels = get_result(key, self.definitions)
+        if isinstance(labels, str):
+            labels = [labels]
+        if (
+            isinstance(labels, list)
+            and labels
+            and all(isinstance(c, str) for c in labels)
+        ):
+            for column in labels:
+                if isinstance(column, str):
+                    tracker.try_add(column)
+        elif not _references_name(key, df_name):
+            del self.dfs[df_name]
+
     def _apply_indexer_assignment(self, target: ast.expr) -> None:
         """
         Add the columns created by `df.loc[rows, cols] = ...` or `df.at[i, col] = ...`.
@@ -962,7 +995,9 @@ class Checker(ast.NodeVisitor):
 
         target_ref = extract_single_column_ref(node.targets[0])
         if target_ref is None:
-            return self.generic_visit(node)
+            self.generic_visit(node)
+            self._apply_dynamic_column_assignment(node.targets[0])
+            return
 
         if target_ref.df_name not in self.dfs:
             # A known variable without a tracked schema (e.g. a dict, or

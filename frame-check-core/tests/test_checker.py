@@ -487,3 +487,48 @@ df[["E", "F"]] = df[["A", "B"]]
     assert len(checker.diagnostics) == 1
     assert "column 'X' does not exist" in checker.diagnostics[0].message
     assert checker.dfs["df"].columns["E"] == {"A", "B"}
+
+
+# --- Assignment with a non-literal key ---
+
+
+def test_assignment_with_variable_key_adds_the_column():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+name = "z"
+df[name] = 1
+cols = ["p", "q"]
+df[cols] = 0
+df["z"]
+df["q"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a", "z", "p", "q"}
+    assert checker.diagnostics == []
+
+
+def test_assignment_with_unresolved_key_stops_tracking():
+    """A loop variable may name any column."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+for c in columns:
+    df[c] = 0
+df["x"]
+"""
+    checker = Checker.check(code)
+    assert "df" not in checker.dfs
+    assert checker.diagnostics == []
+
+
+def test_assignment_with_row_mask_keeps_the_columns():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df[df["a"] > 0] = 0
+df["b"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a"}
+    assert len(checker.diagnostics) == 1
