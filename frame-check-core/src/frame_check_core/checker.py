@@ -169,21 +169,15 @@ def _constant_strs(elts: list[ast.expr]) -> list[str] | None:
     return values or None
 
 
-def _is_frame_root(
-    name: str | None,
-    dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]],
-    pandas: set[str],
-) -> bool:
-    """Whether a chain starting at `name` can evaluate to a frame."""
-    return name is not None and (name in dfs or name in pandas)
-
-
 def _root_name(expr: ast.expr) -> str | None:
     """Return the name a frame expression starts from (`df` in `df[...].a()`)."""
     while True:
         match expr:
             case ast.Call(func=ast.Attribute(value=inner)) | ast.Subscript(value=inner):
                 expr = inner
+            case ast.Call(func=ast.Name(id=name)):
+                # DataFrame(...) with a name imported from pandas
+                return name
             case ast.Name(id=name):
                 return name
             case _:
@@ -256,6 +250,9 @@ class Checker(ast.NodeVisitor):
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
+        # Names imported from pandas: local name -> pandas name
+        # (`from pandas import DataFrame, read_csv as rc`)
+        self.pandas_names: dict[str, str] = {}
         self.definitions: dict[str, Result] = {}
         # Every name bound anywhere (loop targets, parameters, imports, ...)
         self._bound: set[str] = set()
@@ -441,6 +438,12 @@ class Checker(ast.NodeVisitor):
             for column in copy.columns.keys() - outer.columns.keys():
                 outer.try_add(column)
 
+    def _is_frame_root(self, name: str | None) -> bool:
+        """Whether a chain starting at `name` can evaluate to a frame."""
+        return name is not None and (
+            name in self.dfs or name in self.pandas_aliases or name in self.pandas_names
+        )
+
     def _report(self, frame_name: str | None, diag: diagnostic.Diagnostic) -> None:
         """
         Record a diagnostic about the frame named `frame_name`.
@@ -477,15 +480,17 @@ class Checker(ast.NodeVisitor):
         """
         Track pandas imports from 'from' statements.
 
-        Detects `from pandas import DataFrame` style imports. Currently
-        tracks but doesn't fully support this pattern.
+        Records names imported with `from pandas import DataFrame, read_csv`
+        so calls like `DataFrame(...)` are handled like `pd.DataFrame(...)`.
 
         Args:
             node: The import-from AST node.
         """
-        # TODO: Handle `from pandas import DataFrame` etc.
         for alias in node.names:
-            self._bound.add(alias.asname or alias.name)
+            local_name = alias.asname or alias.name
+            self._bound.add(local_name)
+            if node.module == "pandas" and alias.name != "*":
+                self.pandas_names[local_name] = alias.name
         self.generic_visit(node)
 
     def _try_create_dataframe(self, node: ast.Assign) -> bool:
@@ -524,17 +529,37 @@ class Checker(ast.NodeVisitor):
 
     def _is_pandas_call(self, expr: ast.expr) -> bool:
         """Whether `expr` is a call like `pd.read_csv(...)`."""
-        match expr:
-            case ast.Call(
-                func=ast.Attribute(value=ast.Name(id=module_name))
-                | ast.Attribute(
-                    value=ast.Attribute(
-                        value=ast.Name(id=module_name), attr="DataFrame"
-                    )
-                )
+        return (
+            isinstance(expr, ast.Call) and self._pandas_function(expr.func) is not None
+        )
+
+    def _pandas_function(self, func: ast.expr) -> tuple[str, str] | None:
+        """
+        Resolve the function of a call to a pandas function, if it is one.
+
+        Handles `pd.read_csv`, `pd.DataFrame.from_dict`, and names imported
+        from pandas (`read_csv`, `DataFrame.from_dict`).
+
+        Returns:
+            (label for diagnostics, registry name) or None.
+        """
+        match func:
+            case ast.Attribute(value=ast.Name(id=module), attr=name) if (
+                module in self.pandas_aliases
             ):
-                return module_name in self.pandas_aliases
-        return False
+                return f"{module}.{name}", name
+            case ast.Attribute(
+                value=ast.Attribute(value=ast.Name(id=module), attr="DataFrame"),
+                attr=constructor,
+            ) if module in self.pandas_aliases:
+                return f"{module}.DataFrame.{constructor}", f"DataFrame.{constructor}"
+            case ast.Name(id=local) if local in self.pandas_names:
+                return local, self.pandas_names[local]
+            case ast.Attribute(value=ast.Name(id=local), attr=constructor) if (
+                self.pandas_names.get(local) == "DataFrame"
+            ):
+                return f"{local}.{constructor}", f"DataFrame.{constructor}"
+        return None
 
     def _call_pandas(
         self, call: ast.Call, label: str, function_name: str
@@ -650,30 +675,15 @@ class Checker(ast.NodeVisitor):
                 if tracker is None:
                     return None
                 return name, set(tracker.columns)
-            case ast.Call(
-                func=ast.Attribute(value=ast.Name(id=module_name), attr=function_name)
-            ) if module_name in self.pandas_aliases:
-                # pd.DataFrame({...}), pd.read_csv(..., usecols=[...])
-                columns = self._call_pandas(
-                    expr, f"{module_name}.{function_name}", function_name
-                )
+            case ast.Call(func=func) if (
+                pandas_function := self._pandas_function(func)
+            ) is not None:
+                # pd.DataFrame({...}), pd.read_csv(...), DataFrame.from_dict(...)
+                label, function_name = pandas_function
+                columns = self._call_pandas(expr, label, function_name)
                 if columns is None:
                     return None
-                return f"{module_name}.{function_name}(...)", columns
-            case ast.Call(
-                func=ast.Attribute(
-                    value=ast.Attribute(
-                        value=ast.Name(id=module_name), attr="DataFrame"
-                    ),
-                    attr=constructor,
-                )
-            ) if module_name in self.pandas_aliases:
-                # pd.DataFrame.from_dict(...), pd.DataFrame.from_records(...)
-                name = f"DataFrame.{constructor}"
-                columns = self._call_pandas(expr, f"{module_name}.{name}", name)
-                if columns is None:
-                    return None
-                return f"{module_name}.{name}(...)", columns
+                return f"{label}(...)", columns
             case ast.Call(func=ast.Attribute(value=inner, attr=method_name)):
                 frame = self._eval_frame(inner)
                 if frame is None:
@@ -833,7 +843,7 @@ class Checker(ast.NodeVisitor):
         if (
             isinstance(node.func, ast.Attribute)
             and id(node) not in self._evaluated_calls
-            and _is_frame_root(_root_name(node), self.dfs, self.pandas_aliases)
+            and self._is_frame_root(_root_name(node))
         ):
             # Only chains rooted at a tracked frame or pandas can produce a
             # frame; skipping the rest is cheap (np.where(...), s.str.lower())
