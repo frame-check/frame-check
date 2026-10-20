@@ -31,7 +31,7 @@ Example:
 import ast
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 from frame_check_core import diagnostic
 from frame_check_core.diagnostic.region import CodeRegion
@@ -41,6 +41,12 @@ from frame_check_core.extractors import extract, extract_single_column_ref
 from frame_check_core.handlers import pandas as _pandas  # noqa: F401
 from frame_check_core.handlers.models import DF, PD, Result, get_result
 from frame_check_core.tracker import Relaxed, Strict, Tracker
+
+# Statements after which control doesn't continue with the next one
+_EXITS = (ast.Return, ast.Raise, ast.Continue, ast.Break)
+
+# Marks a name that has no definition (None is a valid definition)
+_MISSING: Any = object()
 
 
 def format_diagnostic(
@@ -1084,6 +1090,108 @@ class Checker(ast.NodeVisitor):
             tracker.set_columns({n for n in names if isinstance(n, str)})
         else:
             del self.dfs[df_name]
+
+    def visit_If(self, node: ast.If) -> None:
+        """
+        Visit each branch from the same incoming state, then merge the results.
+
+        A frame's columns after the `if` are the union of its columns in every
+        branch that can fall through (a missing `else` is an empty branch). A
+        frame that isn't tracked in all of them is not tracked afterwards, as
+        its schema is unknown. Branches ending in `return`, `raise`,
+        `continue` or `break` don't reach the code after the `if`, so they
+        are left out of the merge. Diagnostics inside a branch are reported
+        against that branch's own state.
+
+        Only names mentioned in the branches can change, so only those are
+        saved, restored and merged.
+
+        Args:
+            node: The if statement AST node.
+        """
+        self.visit(node.test)
+        branches = (node.body, node.orelse)
+        names = {
+            child.id
+            for branch in branches
+            for stmt in branch
+            for child in ast.walk(stmt)
+            if type(child) is ast.Name
+        }
+        dfs, definitions, named = self.dfs, self.definitions, self._named_index
+        before_dfs = {name: dfs.get(name) for name in names}
+        before_defs = {name: definitions.get(name, _MISSING) for name in names}
+        before_named = names & named
+
+        outcomes = []
+        for branch in branches:
+            for name, tracker in before_dfs.items():
+                if tracker is None:
+                    dfs.pop(name, None)
+                else:
+                    dfs[name] = tracker.copy()
+            for name, value in before_defs.items():
+                if value is _MISSING:
+                    definitions.pop(name, None)
+                else:
+                    definitions[name] = value
+            named -= names
+            named |= before_named
+            for stmt in branch:
+                self.visit(stmt)
+            outcomes.append(
+                (
+                    bool(branch) and isinstance(branch[-1], _EXITS),
+                    {name: dfs.get(name) for name in names},
+                    {name: definitions.get(name, _MISSING) for name in names},
+                    names & named,
+                )
+            )
+
+        # Branches that exit don't flow on; if none flows on, the code after
+        # the `if` is unreachable and any merge will do
+        live = [outcome for outcome in outcomes if not outcome[0]] or outcomes
+
+        named -= names
+        for name in names:
+            trackers = [outcome[1][name] for outcome in live]
+            dfs.pop(name, None)
+            if None not in trackers:
+                self._merge_trackers(name, before_dfs[name], trackers)  # type: ignore[arg-type]
+
+            values = [outcome[2][name] for outcome in live]
+            definitions.pop(name, None)
+            first = values[0]
+            if first is not _MISSING and all(
+                value is first or (value is not _MISSING and value == first)
+                for value in values
+            ):
+                definitions[name] = first  # type: ignore[assignment]
+        for outcome in live:
+            named |= outcome[3]
+
+    def _merge_trackers(
+        self,
+        name: str,
+        original: "Tracker[Strict] | Tracker[Relaxed] | None",
+        trackers: "list[Tracker[Strict] | Tracker[Relaxed]]",
+    ) -> None:
+        """
+        Track `name` with the union of its branch outcomes `trackers`.
+
+        The tracker held before the `if` is kept when there is one, so the
+        enclosing function scope can still recognise it (see `_visit_scope`).
+        Outcomes of different modes can't be combined; the frame is dropped.
+        """
+        base = original if original is not None else trackers[0]
+        if any(tracker.mode != base.mode for tracker in trackers):
+            return
+        merged: dict[str, set[str]] = {}
+        for tracker in trackers:
+            for column, dependencies in tracker.columns.items():
+                merged.setdefault(column, set()).update(dependencies)
+        base.columns = merged
+        self.dfs[name] = base
 
     def visit_Expr(self, node: ast.Expr) -> None:
         """
