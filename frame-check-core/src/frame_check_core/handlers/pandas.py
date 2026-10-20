@@ -1,4 +1,10 @@
-from .dataframe import MERGE_PARAMS, bind_positional, merge_columns
+from .dataframe import (
+    MELT_PARAMS,
+    MERGE_PARAMS,
+    bind_positional,
+    melt_columns,
+    merge_columns,
+)
 from .models import DF, PD, UNPACKED, PDFuncResult, Result, Unknown, idx_or_key
 
 
@@ -187,3 +193,13 @@ def pd_dataframe_from_records(
                 return None, None
             columns -= set(labels)
     return columns, None
+
+
+@PD.register("melt")
+def pd_melt(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.melt(frame, id_vars, value_vars, var_name, value_name, ...)."""
+    frame = idx_or_key(args, keywords, idx=0, key="frame")
+    if not isinstance(frame, DF):
+        return None, None
+    params = bind_positional(args[1:], keywords, MELT_PARAMS)
+    return melt_columns(frame.columns, frame.label, params)

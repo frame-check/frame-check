@@ -596,3 +596,95 @@ def df_groupby(
     if isinstance(by, str) and keywords.get("level") is None and by not in columns:
         error = IllegalAccess(missing=[by])
     return columns, None, error
+
+
+# Positional parameters of DataFrame.melt / pd.melt (after the frame)
+MELT_PARAMS = (
+    "id_vars",
+    "value_vars",
+    "var_name",
+    "value_name",
+    "col_level",
+    "ignore_index",
+)
+
+
+def _label_list(value: Result) -> tuple[list[str], bool]:
+    """
+    Resolve a label-list argument (`None`, `"A"` or `["A", "B"]`).
+
+    Returns the string labels and whether every label was resolved. A label
+    that isn't a string (an int, a variable we can't resolve, a tuple key)
+    makes the list incomplete.
+    """
+    match value:
+        case None:
+            return [], True
+        case str():
+            return [value], True
+        case list():
+            labels = [v for v in value if isinstance(v, str)]
+            return labels, len(labels) == len(value)
+        case _:
+            return [], False
+
+
+def melt_columns(
+    columns: set[str],
+    label: str | None,
+    keywords: dict[str, Result],
+) -> tuple[set[str] | None, IllegalAccess | None]:
+    """
+    Compute the columns of `df.melt(...)` (and `pd.melt`).
+
+    The result is the `id_vars`, then the variable and value columns
+    (`var_name` / `value_name`, default "variable" / "value"). Labels of
+    `id_vars` and `value_vars` missing from the frame raise KeyError.
+
+    Args:
+        columns: Columns of the melted frame.
+        label: Label of the frame for diagnostics, or None when it is the
+            frame the method is called on.
+        keywords: The arguments by name (see `bind_positional`).
+
+    Returns:
+        The melted columns (None when they can't be determined statically)
+        and an error for missing labels, if any.
+    """
+    if UNPACKED in keywords:
+        return None, None
+    if keywords.get("col_level") is not None:
+        # Melts one level of MultiIndex columns
+        return None, None
+
+    ids, ids_known = _label_list(keywords.get("id_vars"))
+    values, _ = _label_list(keywords.get("value_vars"))
+
+    missing = list(dict.fromkeys(c for c in (*ids, *values) if c not in columns))
+    error = None
+    if missing:
+        error = IllegalAccess(
+            missing=missing,
+            frame=label,
+            available=sorted(columns) if label is not None else None,
+        )
+
+    # The default variable name is the name of the columns index, which is
+    # unnamed unless set explicitly (df.columns.name = ...)
+    var_name = keywords.get("var_name", "variable")
+    if var_name is None:
+        var_name = "variable"
+    value_name = keywords.get("value_name", "value")
+    if not (ids_known and isinstance(var_name, str) and isinstance(value_name, str)):
+        # A label list or a None value_name (NaN column) isn't a plain label
+        return None, error
+    return {*ids, var_name, value_name}, error
+
+
+@DF.register("melt")
+def df_melt(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, MELT_PARAMS)
+    melted, error = melt_columns(columns, None, params)
+    return columns, melted, error
