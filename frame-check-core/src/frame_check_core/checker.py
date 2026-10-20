@@ -184,6 +184,37 @@ def _root_name(expr: ast.expr) -> str | None:
                 return None
 
 
+# Methods whose keys may name index levels as well as columns
+_INDEX_KEY_METHODS = frozenset({"groupby", "merge", "join", "sort_values"})
+
+# Methods combining the frame with other frames passed as arguments
+_COMBINING_METHODS = frozenset({"merge", "join"})
+
+# Methods that may give a frame a named index
+_INDEX_CHANGING_METHODS = frozenset(
+    {"set_index", "rename_axis", "set_axis", "pivot", "pivot_table", "stack", "unstack"}
+)
+
+
+def _unnamed_index(value: ast.expr) -> bool:
+    """Whether an `index=` argument certainly has no name (a literal, range)."""
+    match value:
+        case ast.List() | ast.Tuple() | ast.Constant(value=None):
+            return True
+        case ast.Call(func=ast.Name(id="range")):
+            return True
+    return False
+
+
+def _index_attribute_root(target: ast.expr) -> str | None:
+    """`df` for targets like `df.index`, `df.index.name`, `df.index.names`."""
+    while isinstance(target, ast.Attribute):
+        if target.attr == "index" and isinstance(target.value, ast.Name):
+            return target.value.id
+        target = target.value
+    return None
+
+
 def _columns_target(target: ast.expr) -> bool:
     """Whether `target` is `df.columns`."""
     match target:
@@ -250,6 +281,8 @@ class Checker(ast.NodeVisitor):
         self.diagnostics: list[diagnostic.Diagnostic] = []
         self.dfs: dict[str, Tracker[Strict] | Tracker[Relaxed]] = {}
         self.pandas_aliases: set[str] = set()
+        # Frames whose index may carry names (see _index_may_be_named)
+        self._named_index: set[str] = set()
         # Names imported from pandas: local name -> pandas name
         # (`from pandas import DataFrame, read_csv as rc`)
         self.pandas_names: dict[str, str] = {}
@@ -525,6 +558,7 @@ class Checker(ast.NodeVisitor):
         self.dfs[target.id] = Tracker.new_with_columns(
             target.id, columns=list(frame[1])
         )
+        self._update_named_index(target.id, node.value)
         return True
 
     def _is_pandas_call(self, expr: ast.expr) -> bool:
@@ -582,6 +616,9 @@ class Checker(ast.NodeVisitor):
         created_df, error = function(
             call.args, call.keywords, self.definitions, self._frame_arg
         )
+        if function_name in _INDEX_KEY_METHODS and self._may_have_named_index(call):
+            # Keys may name index levels, which aren't tracked
+            error = None
         if error is not None and error.frame is not None:
             self._report(
                 error.frame,
@@ -621,6 +658,15 @@ class Checker(ast.NodeVisitor):
         updated_df, returned_df, error = method(
             call.args, call.keywords, self.definitions, self._frame_arg
         )
+        if method_name in _INDEX_KEY_METHODS and self._may_have_named_index(call):
+            # Keys may name index levels, which aren't tracked
+            error = None
+        if method_name == "reset_index" and self._may_have_named_index(call):
+            # The index level names it turns into columns aren't known
+            if returned_df is not None and returned_df.columns != method.df.columns:
+                returned_df = None
+            if updated_df is not None and updated_df.columns != method.df.columns:
+                updated_df = None
         if error is not None:
             self._report(
                 _root_name(call),
@@ -762,6 +808,88 @@ class Checker(ast.NodeVisitor):
             tracker.set_columns(set(columns))
         else:
             self.dfs[target] = Tracker.new_with_columns(target, columns=list(columns))
+        self._update_named_index(target, value)
+
+    def _update_named_index(self, target: str, value: ast.expr) -> None:
+        """Record whether the frame bound to `target` may have a named index."""
+        if self._index_may_be_named(value):
+            self._named_index.add(target)
+        else:
+            self._named_index.discard(target)
+
+    def _index_may_be_named(self, expr: ast.expr) -> bool:
+        """
+        Whether the frame `expr` evaluates to may have a named index.
+
+        Its index levels can then be used as keys in groupby, merge, join or
+        sort_values, and reset_index adds columns named after them. The
+        index isn't tracked, so this is conservative: a constructor with a
+        non-literal `index=`, `read_*(index_col=...)`, an index-changing
+        method, or any frame derived from such a frame.
+
+        Only the frame's spine is walked (the receiver chain down to its
+        root, plus frame arguments of merges), not every subexpression.
+        """
+        while True:
+            match expr:
+                case ast.Call(func=func, args=args, keywords=keywords) if (
+                    pandas_function := self._pandas_function(func)
+                ) is not None:
+                    return self._pandas_call_may_name_index(
+                        pandas_function[1], args, keywords
+                    )
+                case ast.Call(
+                    func=ast.Attribute(value=inner, attr=method),
+                    args=args,
+                    keywords=keywords,
+                ):
+                    if method in _INDEX_CHANGING_METHODS:
+                        return True
+                    if method in _COMBINING_METHODS and self._any_named_frame(
+                        args, keywords
+                    ):
+                        return True
+                    expr = inner
+                case ast.Subscript(value=inner) | ast.Attribute(value=inner):
+                    expr = inner
+                case ast.Name(id=name):
+                    return name in self._named_index
+                case _:
+                    return False
+
+    def _pandas_call_may_name_index(
+        self, name: str, args: list[ast.expr], keywords: list[ast.keyword]
+    ) -> bool:
+        """`_index_may_be_named` for a pandas function call."""
+        index_args = {kw.arg: kw.value for kw in keywords}
+        if name == "DataFrame" and len(args) > 1:
+            index_args["index"] = args[1]
+        for key in ("index", "index_col"):
+            value = index_args.get(key)
+            if value is not None and not _unnamed_index(value):
+                return True
+        # Built from other frames: pd.DataFrame(df), pd.merge(a, b), pd.concat([a, b])
+        return self._any_named_frame(args, keywords)
+
+    def _any_named_frame(
+        self, args: list[ast.expr], keywords: list[ast.keyword]
+    ) -> bool:
+        """Whether a frame passed in `args`/`keywords` may have a named index."""
+        values = [*args, *(kw.value for kw in keywords)]
+        for value in values:
+            elements = (
+                value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]
+            )
+            if any(self._index_may_be_named(e) for e in elements):
+                return True
+        return False
+
+    def _may_have_named_index(self, call: ast.Call) -> bool:
+        """Whether a frame used in `call` may have a named index."""
+        return any(
+            isinstance(node, ast.Name) and node.id in self._named_index
+            for node in ast.walk(call)
+        )
 
     def _try_dataframe_method(self, call: ast.expr, target: str | None) -> bool:
         """
@@ -849,6 +977,25 @@ class Checker(ast.NodeVisitor):
             # frame; skipping the rest is cheap (np.where(...), s.str.lower())
             self._eval_frame(node)
         self.generic_visit(node)
+
+    def _apply_unpacked_column_assignment(self, target: ast.Tuple | ast.List) -> None:
+        """
+        Add the columns written by `df["a"], df["b"] = ...`.
+
+        The targets are writes, so they're excluded from read validation.
+        """
+        for element in target.elts:
+            if isinstance(element, ast.Starred):
+                element = element.value
+            ref = extract_single_column_ref(element)
+            if ref is None:
+                continue
+            tracker = self.dfs.get(ref.df_name)
+            if tracker is None:
+                continue
+            for column in ref.col_names:
+                tracker.try_add(column)
+            self._skip_subscripts.add(id(ref.node))
 
     def _apply_dynamic_column_assignment(self, target: ast.expr) -> None:
         """
@@ -970,6 +1117,11 @@ class Checker(ast.NodeVisitor):
             `_skip_subscripts` to prevent duplicate diagnostics
             in `visit_Subscript`.
         """
+        # df.index = ..., df.index.name = ...: the index may now be named
+        for target in node.targets:
+            if (name := _index_attribute_root(target)) is not None:
+                self._named_index.add(name)
+
         # Label-based indexer assignment: df.loc[rows, "col"] = v, df.at[i, "col"] = v
         if indexer_targets := [t for t in node.targets if _indexer_target(t)]:
             # The right-hand side is evaluated before the column exists
@@ -1019,6 +1171,16 @@ class Checker(ast.NodeVisitor):
             # (df = df[mask], df = df.sort_values(...)) keep being tracked.
             if var_name in self.dfs and not _references_name(node.value, var_name):
                 del self.dfs[var_name]
+            elif var_name in self.dfs and self._index_may_be_named(node.value):
+                # e.g. df = df.set_index("a"): still tracked, index now named
+                self._named_index.add(var_name)
+
+        # Unpacking into columns: df["a"], df["b"] = ...
+        if len(node.targets) == 1 and isinstance(
+            node.targets[0], (ast.Tuple, ast.List)
+        ):
+            self._apply_unpacked_column_assignment(node.targets[0])
+            return self.generic_visit(node)
 
         # Handle column assignments: df['col'] = expr or df[['a', 'b']] = expr
         if len(node.targets) != 1:
@@ -1056,7 +1218,10 @@ class Checker(ast.NodeVisitor):
             elif not self._is_known(ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(ref.node))
                 return self.generic_visit(node)
-        read_refs = tracked_refs
+        # Reads on the target frame are checked here and become dependencies;
+        # reads on other frames (df["c"] = other["c"]) are checked against
+        # their own frame by visit_Subscript
+        read_refs = [r for r in tracked_refs if r.df_name == target_ref.df_name]
 
         # Every column read on the right-hand side, e.g. both in df[["A", "B"]]
         read_cols = [col for ref in read_refs for col in ref.col_names]

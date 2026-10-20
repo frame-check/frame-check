@@ -505,14 +505,12 @@ def df_filter(
 def df_groupby(
     columns: set[str], args: list[Result], keywords: dict[str, Result]
 ) -> DFFuncResult:
-    # Returns a GroupBy, not a frame. String keys must be columns (KeyError);
-    # other keys (Series, functions, level=) aren't checked.
+    # Returns a GroupBy, not a frame. A string key must be a column
+    # (KeyError). A list isn't checked: one as long as the frame is used as
+    # group labels, and the row count isn't known. Series, functions and
+    # level= aren't checked either.
     by = idx_or_key(args, keywords, idx=0, key="by")
-    if isinstance(by, str):
-        by = [by]
     error = None
-    if isinstance(by, list) and keywords.get("level") is None:
-        keys = {key for key in by if isinstance(key, str)}
-        if missing := keys - columns:
-            error = IllegalAccess(missing=sorted(missing))
+    if isinstance(by, str) and keywords.get("level") is None and by not in columns:
+        error = IllegalAccess(missing=[by])
     return columns, None, error

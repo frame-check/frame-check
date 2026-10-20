@@ -573,3 +573,58 @@ df["c"]
     checker = Checker.check(code)
     assert set(checker.dfs["df"].columns) == {"b"}
     assert len(checker.diagnostics) == 1
+
+
+# --- Right-hand side reads from other frames ---
+
+
+def test_read_from_another_frame_is_checked_against_that_frame():
+    """df["c"] = other["c"] is valid when only `other` has c."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+other = pd.DataFrame({"c": [2]})
+df["c"] = other["c"]
+df["d"] = other["a"]
+df["c"]
+"""
+    checker = Checker.check(code)
+    assert {"a", "c"} <= set(checker.dfs["df"].columns)
+    messages = [d.message.splitlines()[0] for d in checker.diagnostics]
+    assert messages == ["Column 'a' does not exist on DataFrame 'other'."]
+
+
+def test_mixed_right_hand_side_records_same_frame_dependencies():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+other = pd.DataFrame({"c": [2]})
+df["e"] = df["a"] + other["c"]
+"""
+    checker = Checker.check(code)
+    assert checker.dfs["df"].columns["e"] == {"a"}
+    assert checker.diagnostics == []
+
+
+def test_unpacking_into_columns_adds_them():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df["b"], df["c"] = df["a"] * 2, df["a"] * 3
+df["b"]
+df["c"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a", "b", "c"}
+    assert checker.diagnostics == []
+
+
+def test_unpacking_still_checks_the_right_hand_side():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df["b"], df["c"] = df["z"], 1
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "Column 'z' does not exist" in checker.diagnostics[0].message
