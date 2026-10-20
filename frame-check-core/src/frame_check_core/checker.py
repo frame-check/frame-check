@@ -332,6 +332,35 @@ def _indexer_target(target: ast.expr) -> bool:
     return False
 
 
+# Methods whose result has columns that can't be known statically
+_UNKNOWN_COLUMNS_METHODS = frozenset(
+    {"pivot", "pivot_table", "get_dummies", "stack", "unstack", "transpose"}
+)
+
+
+def _reshapes(expr: ast.expr) -> bool:
+    """
+    Whether the spine of `expr` goes through a reshaping with unknown columns.
+
+    That is the `.T` attribute or a call like `unstack()`, as in
+    `df.T.copy()` or `df.pivot_table(...).reset_index()`.
+    """
+    while True:
+        match expr:
+            case ast.Attribute(attr="T"):
+                return True
+            case ast.Call(func=ast.Attribute(attr=method)) if (
+                method in _UNKNOWN_COLUMNS_METHODS
+            ):
+                return True
+            case ast.Call(func=inner) | ast.Attribute(value=inner):
+                expr = inner
+            case ast.Subscript(value=inner):
+                expr = inner
+            case _:
+                return False
+
+
 def _references_name(node: ast.AST, name: str) -> bool:
     """Check whether `name` is used anywhere inside `node`."""
     return any(
@@ -1575,6 +1604,8 @@ class Checker(ast.NodeVisitor):
                 not _references_name(node.value, var_name)
                 # df = pd.get_dummies(df): a pandas call with an unknown result
                 or self._is_pandas_call(node.value)
+                # df = df.T, df = df.stack().unstack(): unknown columns
+                or _reshapes(node.value)
             ):
                 del self.dfs[var_name]
             elif var_name in self.dfs and self._index_may_be_named(node.value):

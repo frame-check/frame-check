@@ -307,3 +307,86 @@ def test_self_rebinding_unknown_result_drops_the_schema(call: str):
     assert "df" not in fc.dfs
     # Only the invalid get_dummies call itself is reported, not the reads
     assert all("get_dummies()" in d.message for d in fc.diagnostics)
+
+
+@pytest.mark.support(code="#EC-8")
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "df.stack()",
+        "df.unstack()",
+        "df.stack(future_stack=True)",
+        "df.unstack(level=0)",
+        "df.stack().unstack()",
+        "df.stack().unstack(level=0).reset_index()",
+        'df.set_index("id").unstack()',
+        'df.set_index(["id", "a"]).unstack("a")',
+    ],
+)
+def test_ec_8_stack_and_unstack_results_are_unknown(expr: str):
+    _pandas_run(SETUP, expr)
+    fc = _check(expr, SETUP)
+    assert "out" not in fc.dfs
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#CAM-23")
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "df.unstack()",
+        'df.groupby(["id", "a"])["b"].sum().unstack()',
+        'df.set_index(["id", "a"]).unstack()',
+    ],
+)
+def test_cam_23_unstack_result_is_unknown(expr: str):
+    _pandas_run(SETUP, expr)
+    fc = Checker.check(SETUP + f"out = {expr}\nout['x']\n")
+    assert "out" not in fc.dfs
+    assert fc.diagnostics == []
+
+
+@pytest.mark.support(code="#EC-9")
+@pytest.mark.parametrize("expr", ["df.T", "df.transpose()", "df.transpose().T"])
+def test_ec_9_transpose_result_is_unknown(expr: str):
+    _pandas_run(SETUP, expr)
+    fc = Checker.check(SETUP + f"out = {expr}\nout['x']\nout.loc['a']\n")
+    assert "out" not in fc.dfs
+    assert fc.diagnostics == []
+
+
+@pytest.mark.parametrize(
+    "expr",
+    ['df.T["x"]', 'df.T.loc["x"]', 'df.transpose()["x"]', 'df.T.assign(z=1)["x"]'],
+)
+def test_reading_a_transposed_frame_is_not_validated(expr: str):
+    fc = Checker.check(SETUP + f"{expr}\n")
+    assert fc.diagnostics == []
+
+
+@pytest.mark.parametrize(
+    "stmt",
+    [
+        "df = df.T",
+        "df = df.transpose()",
+        "df = df.T.copy()",
+        "df = df.T.reset_index()",
+        "df = df.stack()",
+        "df = df.unstack()",
+        "df = df.stack().unstack()",
+        "df = df.T[df.T.columns[:1]]",
+        'df = df.pivot_table(index="id", values="a").reset_index()',
+        'df = df.pivot(columns="a").droplevel(0, axis=1)',
+        "df = pd.get_dummies(df).astype(int)",
+    ],
+)
+def test_self_rebinding_reshape_drops_the_schema(stmt: str):
+    fc = Checker.check(SETUP + f'{stmt}\ndf["x"]\ndf["a"]\n')
+    assert "df" not in fc.dfs
+    assert fc.diagnostics == []
+
+
+def test_derived_frames_still_follow_their_schema():
+    # Only the transposing expressions are dropped
+    fc = Checker.check(SETUP + 'df = df.assign(z=1).copy()\ndf["z"]\ndf["x"]\n')
+    assert len(fc.diagnostics) == 1

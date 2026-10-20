@@ -766,3 +766,14 @@ def df_pivot_table(
 ) -> DFFuncResult:
     params = bind_positional(args, keywords, PIVOT_TABLE_PARAMS)
     return columns, None, pivot_table_error(columns, None, params)
+
+
+# The result is a Series, or a frame whose columns are the values of an index
+# level (or the old index), so it is unknown.
+@DF.register("stack")
+@DF.register("unstack")
+@DF.register("transpose")
+def df_unknown_columns(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    return columns, None, None
