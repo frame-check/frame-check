@@ -1056,7 +1056,10 @@ class Checker(ast.NodeVisitor):
             elif not self._is_known(ref.df_name):
                 self.diagnostics.append(diagnostic.df_is_not_declared(ref.node))
                 return self.generic_visit(node)
-        read_refs = tracked_refs
+        # Reads on the target frame are checked here and become dependencies;
+        # reads on other frames (df["c"] = other["c"]) are checked against
+        # their own frame by visit_Subscript
+        read_refs = [r for r in tracked_refs if r.df_name == target_ref.df_name]
 
         # Every column read on the right-hand side, e.g. both in df[["A", "B"]]
         read_cols = [col for ref in read_refs for col in ref.col_names]
