@@ -1,5 +1,5 @@
 from .dataframe import MERGE_PARAMS, bind_positional, merge_columns
-from .models import DF, PD, UNPACKED, PDFuncResult, Result, idx_or_key
+from .models import DF, PD, UNPACKED, PDFuncResult, Result, Unknown, idx_or_key
 
 
 @PD.register("DataFrame")
@@ -22,13 +22,15 @@ def pd_dataframe(args: list[Result], keywords: dict[str, Result]) -> PDFuncResul
             # Copy constructor: pd.DataFrame(other_df)
             return set(data.columns), None
         case dict():
-            return {k for k in data if isinstance(k, str)}, None
+            return _dict_columns(data), None
         case list():
             columns: set[str] = set()
             for item in data:
                 if not isinstance(item, dict):
                     return None, None
-                columns |= {k for k in item if isinstance(k, str)}
+                if (item_columns := _dict_columns(item)) is None:
+                    return None, None
+                columns |= item_columns
             return columns, None
         case _:
             return None, None
@@ -114,6 +116,18 @@ def pd_concat(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
     return None, None
 
 
+def _dict_columns(data: dict) -> set[str] | None:
+    """
+    Column labels from the keys of a dict of columns.
+
+    None when a key can't be resolved (a variable we don't know, or a tuple
+    key creating MultiIndex columns): the columns are then unknown.
+    """
+    if any(key is Unknown for key in data):
+        return None
+    return {key for key in data if isinstance(key, str)}
+
+
 def _string_list(value: Result) -> list[str] | None:
     """Return `value` as a list of column names if it is one, else None."""
     if isinstance(value, str):
@@ -132,7 +146,7 @@ def pd_dataframe_from_dict(
     given = "orient" in keywords or len(args) > 1
     orient = idx_or_key(args, keywords, idx=1, key="orient") if given else "columns"
     if orient == "columns" and isinstance(data, dict):
-        return {k for k in data if isinstance(k, str)}, None
+        return _dict_columns(data), None
     if orient == "index":
         # Keys become the index; columns come from columns= if given
         labels = _string_list(idx_or_key(args, keywords, idx=3, key="columns"))

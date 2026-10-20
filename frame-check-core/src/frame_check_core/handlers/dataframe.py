@@ -74,9 +74,9 @@ def df_rename(
             return columns, None if inplace is True else columns, None
         col_mapping = idx_or_key(args, keywords, idx=0, key="mapper")
 
-    if not isinstance(col_mapping, dict):
-        # A callable (str.upper) or an unresolved mapping renames columns in
-        # ways we can't know: the result is unknown
+    if not isinstance(col_mapping, dict) or Unknown in col_mapping:
+        # A callable (str.upper), an unresolved mapping or an unresolved key
+        # renames columns in ways we can't know: the result is unknown
         if inplace is True:
             return None, None, None
         return columns, None, None

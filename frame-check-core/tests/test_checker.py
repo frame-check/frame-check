@@ -532,3 +532,44 @@ df["b"]
     checker = Checker.check(code)
     assert set(checker.dfs["df"].columns) == {"a"}
     assert len(checker.diagnostics) == 1
+
+
+# --- Dict keys that aren't plain labels ---
+
+
+def test_tuple_keys_do_not_crash_and_are_not_tracked():
+    """A tuple key creates MultiIndex columns, where df["A"] is valid."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({("A", "x"): [1], "b": [2]})
+df["A"]
+"""
+    checker = Checker.check(code)
+    assert "df" not in checker.dfs
+    assert checker.diagnostics == []
+
+
+def test_unresolved_dict_key_makes_columns_unknown():
+    code = """
+import pandas as pd
+df = pd.DataFrame({name: [1], "b": [2]})
+df2 = pd.DataFrame({"a": [1]}).rename(columns={old: "new"})
+df["anything"]
+df2["anything"]
+"""
+    checker = Checker.check(code)
+    assert "df" not in checker.dfs
+    assert "df2" not in checker.dfs
+    assert checker.diagnostics == []
+
+
+def test_non_string_keys_still_track_string_columns():
+    """Integer labels can't be read as df["..."], so only strings matter."""
+    code = """
+import pandas as pd
+df = pd.DataFrame({0: [1], "b": [2]})
+df["c"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"b"}
+    assert len(checker.diagnostics) == 1
