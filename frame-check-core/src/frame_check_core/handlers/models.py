@@ -99,6 +99,10 @@ def get_value(
                 if key_node is None:
                     continue
                 key = get_value(key_node, definitions, frames)
+                if isinstance(key, (list, dict)):
+                    # e.g. a tuple key ("A", "x"): unhashable as resolved, and
+                    # not a plain column label anyway
+                    key = Unknown
                 value = get_value(value_node, definitions, frames)
                 result_dict[key] = value
             return result_dict
