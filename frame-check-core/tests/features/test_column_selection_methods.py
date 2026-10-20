@@ -82,7 +82,6 @@ def test_unresolvable_filter_is_not_tracked(expr: str):
     ("call", "missing"),
     [
         ('df.groupby("Z").sum()', "'Z'"),
-        ('df.groupby(["A", "Z"]).sum()', "'Z'"),
         ('df.groupby(by="Z")["A"].mean()', "'Z'"),
     ],
 )
@@ -101,6 +100,7 @@ def test_groupby_with_missing_key_is_reported(call: str, missing: str):
     [
         'df.groupby("A").sum()',
         'df.groupby(["A", df["B"]]).sum()',
+        'df.groupby(["A", "Z"]).sum()',  # a list may be group labels
         "df.groupby(level=0).sum()",
         "df.groupby(key_func).sum()",
         'df["C"] = df.groupby("A")["B"].transform("mean")',
