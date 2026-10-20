@@ -688,3 +688,81 @@ def df_melt(
     params = bind_positional(args, keywords, MELT_PARAMS)
     melted, error = melt_columns(columns, None, params)
     return columns, melted, error
+
+
+def reshape_error(
+    columns: set[str], label: str | None, labels: list[str]
+) -> IllegalAccess | None:
+    """Report the `labels` missing from `columns` (a KeyError at runtime)."""
+    missing = list(dict.fromkeys(c for c in labels if c not in columns))
+    if not missing:
+        return None
+    return IllegalAccess(
+        missing=missing,
+        frame=label,
+        available=sorted(columns) if label is not None else None,
+    )
+
+
+def pivot_error(
+    columns: set[str], label: str | None, keywords: dict[str, Result]
+) -> IllegalAccess | None:
+    """
+    Validate the labels of `df.pivot(index=, columns=, values=)`.
+
+    A string or a list of strings in any of them must be a column: unlike
+    pivot_table, an index level name isn't accepted.
+    """
+    if UNPACKED in keywords:
+        return None
+    labels = [
+        name
+        for key in ("index", "columns", "values")
+        for name in _label_list(keywords.get(key))[0]
+    ]
+    return reshape_error(columns, label, labels)
+
+
+# Positional parameters of DataFrame.pivot_table / pd.pivot_table (after the frame)
+PIVOT_TABLE_PARAMS = ("values", "index", "columns")
+
+
+def pivot_table_error(
+    columns: set[str], label: str | None, keywords: dict[str, Result]
+) -> IllegalAccess | None:
+    """
+    Validate the labels of `df.pivot_table(values=, index=, columns=)`.
+
+    `values` and `index` take a string or a list of strings that must be
+    columns. A string `columns` must be one too, but a list is not checked:
+    pandas doesn't raise for an unknown label in a list of several. Callers
+    must also drop the error when the frame may have a named index, since
+    `index` and `columns` accept index level names.
+    """
+    if UNPACKED in keywords:
+        return None
+    labels = [
+        *_label_list(keywords.get("index"))[0],
+        *(c for c in [keywords.get("columns")] if isinstance(c, str)),
+        *_label_list(keywords.get("values"))[0],
+    ]
+    return reshape_error(columns, label, labels)
+
+
+# The columns of these results come from the data (the values of the pivoted
+# columns), so the result is unknown. Only the labels are validated.
+
+
+@DF.register("pivot")
+def df_pivot(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    return columns, None, pivot_error(columns, None, keywords)
+
+
+@DF.register("pivot_table")
+def df_pivot_table(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, PIVOT_TABLE_PARAMS)
+    return columns, None, pivot_table_error(columns, None, params)

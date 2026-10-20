@@ -211,7 +211,7 @@ def _root_name(expr: ast.expr) -> str | None:
 
 # Methods whose keys may name index levels as well as columns
 _INDEX_KEY_METHODS = frozenset(
-    {"groupby", "merge", "join", "sort_values", "query", "eval"}
+    {"groupby", "merge", "join", "sort_values", "query", "eval", "pivot_table"}
 )
 
 # Methods combining the frame with other frames passed as arguments
@@ -1571,7 +1571,11 @@ class Checker(ast.NodeVisitor):
             # Rebinding a tracked frame to an unrelated value (df = load())
             # makes its schema stale. Values derived from the frame itself
             # (df = df[mask], df = df.sort_values(...)) keep being tracked.
-            if var_name in self.dfs and not _references_name(node.value, var_name):
+            if var_name in self.dfs and (
+                not _references_name(node.value, var_name)
+                # df = pd.get_dummies(df): a pandas call with an unknown result
+                or self._is_pandas_call(node.value)
+            ):
                 del self.dfs[var_name]
             elif var_name in self.dfs and self._index_may_be_named(node.value):
                 # e.g. df = df.set_index("a"): still tracked, index now named

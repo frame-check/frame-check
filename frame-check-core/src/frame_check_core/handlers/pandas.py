@@ -1,9 +1,13 @@
 from .dataframe import (
     MELT_PARAMS,
     MERGE_PARAMS,
+    PIVOT_TABLE_PARAMS,
     bind_positional,
     melt_columns,
     merge_columns,
+    pivot_error,
+    pivot_table_error,
+    reshape_error,
 )
 from .models import DF, PD, UNPACKED, PDFuncResult, Result, Unknown, idx_or_key
 
@@ -203,3 +207,38 @@ def pd_melt(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
         return None, None
     params = bind_positional(args[1:], keywords, MELT_PARAMS)
     return melt_columns(frame.columns, frame.label, params)
+
+
+@PD.register("get_dummies")
+def pd_get_dummies(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.get_dummies(data, prefix, prefix_sep, dummy_na, columns, ...)."""
+    # The new column names come from the values of the encoded columns, so the
+    # result is unknown. Labels in columns= must exist (KeyError).
+    data = idx_or_key(args, keywords, idx=0, key="data")
+    if not isinstance(data, DF) or UNPACKED in keywords:
+        return None, None
+    columns = idx_or_key(args, keywords, idx=4, key="columns")
+    if not isinstance(columns, list):
+        # A string raises TypeError; no columns= encodes the text columns
+        return None, None
+    labels = [c for c in columns if isinstance(c, str)]
+    return None, reshape_error(data.columns, data.label, labels)
+
+
+@PD.register("pivot")
+def pd_pivot(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.pivot(data, *, columns, index, values): columns are unknown."""
+    data = idx_or_key(args, keywords, idx=0, key="data")
+    if not isinstance(data, DF):
+        return None, None
+    return None, pivot_error(data.columns, data.label, keywords)
+
+
+@PD.register("pivot_table")
+def pd_pivot_table(args: list[Result], keywords: dict[str, Result]) -> PDFuncResult:
+    """Handle pd.pivot_table(data, values, index, columns, ...): columns are unknown."""
+    data = idx_or_key(args, keywords, idx=0, key="data")
+    if not isinstance(data, DF):
+        return None, None
+    params = bind_positional(args[1:], keywords, PIVOT_TABLE_PARAMS)
+    return None, pivot_table_error(data.columns, data.label, params)
