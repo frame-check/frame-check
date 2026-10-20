@@ -210,7 +210,9 @@ def _root_name(expr: ast.expr) -> str | None:
 
 
 # Methods whose keys may name index levels as well as columns
-_INDEX_KEY_METHODS = frozenset({"groupby", "merge", "join", "sort_values"})
+_INDEX_KEY_METHODS = frozenset(
+    {"groupby", "merge", "join", "sort_values", "query", "eval"}
+)
 
 # Methods combining the frame with other frames passed as arguments
 _COMBINING_METHODS = frozenset({"merge", "join"})
