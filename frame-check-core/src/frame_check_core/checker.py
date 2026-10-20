@@ -850,6 +850,25 @@ class Checker(ast.NodeVisitor):
             self._eval_frame(node)
         self.generic_visit(node)
 
+    def _apply_unpacked_column_assignment(self, target: ast.Tuple | ast.List) -> None:
+        """
+        Add the columns written by `df["a"], df["b"] = ...`.
+
+        The targets are writes, so they're excluded from read validation.
+        """
+        for element in target.elts:
+            if isinstance(element, ast.Starred):
+                element = element.value
+            ref = extract_single_column_ref(element)
+            if ref is None:
+                continue
+            tracker = self.dfs.get(ref.df_name)
+            if tracker is None:
+                continue
+            for column in ref.col_names:
+                tracker.try_add(column)
+            self._skip_subscripts.add(id(ref.node))
+
     def _apply_dynamic_column_assignment(self, target: ast.expr) -> None:
         """
         Handle `df[key] = ...` where `key` isn't a literal label.
@@ -1019,6 +1038,13 @@ class Checker(ast.NodeVisitor):
             # (df = df[mask], df = df.sort_values(...)) keep being tracked.
             if var_name in self.dfs and not _references_name(node.value, var_name):
                 del self.dfs[var_name]
+
+        # Unpacking into columns: df["a"], df["b"] = ...
+        if len(node.targets) == 1 and isinstance(
+            node.targets[0], (ast.Tuple, ast.List)
+        ):
+            self._apply_unpacked_column_assignment(node.targets[0])
+            return self.generic_visit(node)
 
         # Handle column assignments: df['col'] = expr or df[['a', 'b']] = expr
         if len(node.targets) != 1:

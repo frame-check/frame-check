@@ -604,3 +604,27 @@ df["e"] = df["a"] + other["c"]
     checker = Checker.check(code)
     assert checker.dfs["df"].columns["e"] == {"a"}
     assert checker.diagnostics == []
+
+
+def test_unpacking_into_columns_adds_them():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df["b"], df["c"] = df["a"] * 2, df["a"] * 3
+df["b"]
+df["c"]
+"""
+    checker = Checker.check(code)
+    assert set(checker.dfs["df"].columns) == {"a", "b", "c"}
+    assert checker.diagnostics == []
+
+
+def test_unpacking_still_checks_the_right_hand_side():
+    code = """
+import pandas as pd
+df = pd.DataFrame({"a": [1]})
+df["b"], df["c"] = df["z"], 1
+"""
+    checker = Checker.check(code)
+    assert len(checker.diagnostics) == 1
+    assert "Column 'z' does not exist" in checker.diagnostics[0].message
