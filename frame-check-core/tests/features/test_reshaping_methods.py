@@ -109,9 +109,13 @@ def test_self_rebinding_melt_replaces_the_schema():
     assert fc.diagnostics[0].message.startswith("Column 'a' does not exist")
 
 
+# p has 4 rows, more than any key list below: pandas groups by a list of keys
+# as long as the frame as an array of labels (see pivot_table_error)
 PIVOT_SETUP = """
 import pandas as pd
-p = pd.DataFrame({"i": [1, 1, 2], "c": ["x", "y", "x"], "v": [1, 2, 3], "w": [1, 2, 3]})
+p = pd.DataFrame(
+    {"i": [1, 1, 2, 2], "c": ["x", "y", "x", "y"], "v": [1, 2, 3, 4], "w": [1, 2, 3, 4]}
+)
 named = pd.DataFrame({"c": ["x", "y"], "v": [1, 2]}, index=pd.Index([1, 1], name="i"))
 """
 
@@ -235,7 +239,6 @@ def test_pivot_does_not_accept_index_level_names():
         'p.pivot_table(index="i", values=["v", "w"], aggfunc="sum")',
         'p.pivot_table("v", "i", "c")',
         'p.pivot_table(index=["i"], columns="c", values="v", margins=True)',
-        'p.pivot_table(index="i", columns=["c", "zz"], values="v")',
         'pd.pivot_table(p, index="i", columns="c", values="v")',
         'pd.pivot_table(p, "v", "i", "c")',
         'p.pivot_table(index="i", values="v", aggfunc=agg)',
@@ -284,11 +287,25 @@ def test_pivot_table_accepts_index_level_names():
         assert "out" not in fc.dfs
 
 
-def test_pivot_table_unknown_list_column_is_not_reported():
-    # pandas doesn't raise for an unknown label in a list of several columns
+def test_pivot_table_columns_list_is_not_validated():
+    # pandas raises for an unknown label in a list of columns, but the list
+    # is conservatively left unchecked
     expr = 'p.pivot_table(index="i", columns=["c", "zz"], values="v")'
-    _pandas_run(PIVOT_SETUP, expr)
-    assert _check(expr).diagnostics == []
+    with pytest.raises(KeyError):
+        _pandas_run(PIVOT_SETUP, expr)
+    fc = _check(expr)
+    assert fc.diagnostics == []
+    assert "out" not in fc.dfs
+
+
+def test_pivot_table_key_list_as_long_as_the_frame_is_an_array():
+    # The one case where pandas accepts unknown labels: index + columns has
+    # exactly as many keys as the frame has rows, so it is used as an array
+    # of group labels. This is why a columns list isn't validated.
+    setup = 'import pandas as pd\np = pd.DataFrame({"i": [1, 2], "v": [1, 2]})\n'
+    _pandas_run(setup, 'p.pivot_table(index="i", columns=["zz"], values="v")')
+    fc = _check('p.pivot_table(index="i", columns=["zz"], values="v")', setup)
+    assert fc.diagnostics == []
 
 
 @pytest.mark.parametrize(

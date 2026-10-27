@@ -735,10 +735,14 @@ def pivot_table_error(
     Validate the labels of `df.pivot_table(values=, index=, columns=)`.
 
     `values` and `index` take a string or a list of strings that must be
-    columns. A string `columns` must be one too, but a list is not checked:
-    pandas doesn't raise for an unknown label in a list of several. Callers
-    must also drop the error when the frame may have a named index, since
-    `index` and `columns` accept index level names.
+    columns, and so does a string `columns`. An unknown label in a list
+    `columns` raises a KeyError too, but the list is conservatively left
+    unchecked. (pandas groups by `index + columns`, and when that key list
+    is exactly as long as the frame and not all of its labels are columns,
+    it is used as an array of group labels instead and nothing is raised.
+    The row count isn't known statically; this degenerate case is accepted
+    for `index`.) Callers must also drop the error when the frame may have
+    a named index, since `index` and `columns` accept index level names.
     """
     if UNPACKED in keywords:
         return None
