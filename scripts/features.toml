@@ -251,22 +251,22 @@ supported = true
 title = "From pivot"
 code = """df.pivot(columns='A')"""
 description = "Creates multiple columns through pivot operations that reshape the DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_23]
 title = "From unstack"
 code = """df = df.unstack()"""
 description = "Converts index levels to columns in a multi-index DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_24]
 title = "From pd.get_dummies"
 code = """df = pd.get_dummies(df, columns=['A'])"""
 description = "Creates multiple binary indicator columns from categorical columns."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_25]
 title = "Update method"
@@ -416,22 +416,22 @@ supported = false
 title = "Pivot operations"
 code = """df.pivot_table(index='date', columns='category', values='amount')"""
 description = "Dramatically reshapes the column structure based on unique values."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_8]
 title = "Stack/unstack"
 code = """df = df.stack().unstack(level=0)"""
 description = "Converts between index levels and columns, potentially changing column names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_9]
 title = "Transpose"
 code = """df = df.T"""
 description = "Swaps rows and columns, turning row indices into column names."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [edge_cases.ec_10]
 title = "Column assignment in chain"
