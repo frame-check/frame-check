@@ -50,7 +50,10 @@ _LOOP_PASSES = 3
 
 # The trackers, definitions and named-index flags of some names
 type _State = tuple[
-    dict[str, Tracker[Strict] | Tracker[Relaxed] | None], dict[str, Any], set[str]
+    dict[str, Tracker[Strict] | Tracker[Relaxed] | None],
+    dict[str, Any],
+    set[str],
+    set[str],
 ]
 
 
@@ -60,11 +63,12 @@ def _state_signature(state: _State) -> tuple[object, ...]:
 
     Merging only adds columns and drops trackers and definitions.
     """
-    trackers, values, named = state
+    trackers, values, named, named_columns = state
     return (
         {name: len(t.columns) for name, t in trackers.items() if t is not None},
         {name for name, value in values.items() if value is not _MISSING},
         named,
+        named_columns,
     )
 
 
@@ -294,6 +298,32 @@ def _known_data(value: Result) -> bool:
     return False
 
 
+# Methods that may give a frame a named or MultiIndex columns axis
+_COLUMNS_AXIS_METHODS = frozenset(
+    {
+        "rename_axis",
+        "set_axis",
+        "reindex",
+        "pivot",
+        "pivot_table",
+        "stack",
+        "unstack",
+        "transpose",
+    }
+)
+
+
+def _columns_axis_root(target: ast.expr) -> str | None:
+    """`df` for `df.columns.name` or `df.columns.names` (not `df.columns`)."""
+    match target:
+        case ast.Attribute(
+            value=ast.Attribute(value=ast.Name(id=name), attr="columns"),
+            attr="name" | "names",
+        ):
+            return name
+    return None
+
+
 def _unnamed_index(value: ast.expr) -> bool:
     """Whether an `index=` argument certainly has no name (a literal, range)."""
     match value:
@@ -361,6 +391,11 @@ def _reshapes(expr: ast.expr) -> bool:
                 return False
 
 
+def _keyword(call: ast.Call, name: str) -> ast.expr | None:
+    """The value of keyword argument `name` of `call`, if passed."""
+    return next((kw.value for kw in call.keywords if kw.arg == name), None)
+
+
 def _references_name(node: ast.AST, name: str) -> bool:
     """Check whether `name` is used anywhere inside `node`."""
     return any(
@@ -410,6 +445,9 @@ class Checker(ast.NodeVisitor):
         self.pandas_aliases: set[str] = set()
         # Frames whose index may carry names (see _index_may_be_named)
         self._named_index: set[str] = set()
+        # Frames whose columns axis may be named or a MultiIndex
+        # (see _columns_may_be_named)
+        self._named_columns: set[str] = set()
         # Names imported from pandas: local name -> pandas name
         # (`from pandas import DataFrame, read_csv as rc`)
         self.pandas_names: dict[str, str] = {}
@@ -691,6 +729,7 @@ class Checker(ast.NodeVisitor):
             target.id, columns=list(frame[1])
         )
         self._update_named_index(target.id, node.value)
+        self._update_named_columns(target.id, node.value)
         return True
 
     def _is_pandas_call(self, expr: ast.expr) -> bool:
@@ -751,6 +790,14 @@ class Checker(ast.NodeVisitor):
         if function_name in _INDEX_KEY_METHODS and self._may_have_named_index(call):
             # Keys may name index levels, which aren't tracked
             error = None
+        if (
+            function_name == "melt"
+            and created_df is not None
+            and self._melt_var_name_from_columns(call, offset=1)
+        ):
+            frame = call.args[0] if call.args else _keyword(call, "frame")
+            if frame is None or self._columns_may_be_named(frame):
+                created_df = None
         if error is not None and error.frame is not None:
             self._report(
                 error.frame,
@@ -793,6 +840,15 @@ class Checker(ast.NodeVisitor):
         if method_name in _INDEX_KEY_METHODS and self._may_have_named_index(call):
             # Keys may name index levels, which aren't tracked
             error = None
+        if (
+            method_name == "melt"
+            and returned_df is not None
+            and isinstance(call.func, ast.Attribute)
+            and self._melt_var_name_from_columns(call, offset=0)
+            and self._columns_may_be_named(call.func.value)
+        ):
+            # The variable column is named after the columns axis
+            returned_df = None
         if method_name == "reset_index" and self._may_have_named_index(call):
             # The index level names it turns into columns aren't known
             if returned_df is not None and returned_df.columns != method.df.columns:
@@ -941,6 +997,7 @@ class Checker(ast.NodeVisitor):
         else:
             self.dfs[target] = Tracker.new_with_columns(target, columns=list(columns))
         self._update_named_index(target, value)
+        self._update_named_columns(target, value)
 
     def _update_named_index(self, target: str, value: ast.expr) -> None:
         """Record whether the frame bound to `target` may have a named index."""
@@ -1069,14 +1126,85 @@ class Checker(ast.NodeVisitor):
         self, args: list[ast.expr], keywords: list[ast.keyword]
     ) -> bool:
         """Whether a frame passed in `args`/`keywords` may have a named index."""
-        values = [*args, *(kw.value for kw in keywords)]
-        for value in values:
+        return self._any_frame(args, keywords, self._index_may_be_named)
+
+    def _update_named_columns(self, target: str, value: ast.expr) -> None:
+        """Record whether the frame bound to `target` may have named columns."""
+        if self._columns_may_be_named(value):
+            self._named_columns.add(target)
+        else:
+            self._named_columns.discard(target)
+
+    def _columns_may_be_named(self, expr: ast.expr) -> bool:
+        """
+        Whether the columns axis of the frame `expr` evaluates to may be
+        named, or be a MultiIndex.
+
+        `melt` then names its variable column(s) after the axis. Like
+        `_index_may_be_named`, only the spine is walked. Frames built by
+        DataFrame constructors from literals have an unnamed flat axis;
+        frames read from files (a parquet or pickle file can store the
+        name, `header=[0, 1]` reads a MultiIndex), `concat(keys=...)` and
+        methods like rename_axis or set_axis may not.
+        """
+        while True:
+            match expr:
+                case ast.Call(func=func, args=args, keywords=keywords) if (
+                    pandas_function := self._pandas_function(func)
+                ) is not None:
+                    name = pandas_function[1]
+                    if name.startswith("read_") or (
+                        name == "concat" and any(kw.arg == "keys" for kw in keywords)
+                    ):
+                        return True
+                    return self._any_frame(args, keywords, self._columns_may_be_named)
+                case ast.Call(
+                    func=ast.Attribute(value=inner, attr=method),
+                    args=args,
+                    keywords=keywords,
+                ):
+                    if method in _COLUMNS_AXIS_METHODS:
+                        return True
+                    if method in _COMBINING_METHODS and self._any_frame(
+                        args, keywords, self._columns_may_be_named
+                    ):
+                        return True
+                    expr = inner
+                case ast.Attribute(attr="T"):
+                    return True
+                case ast.Subscript(value=inner) | ast.Attribute(value=inner):
+                    expr = inner
+                case ast.Name(id=name):
+                    return name in self._named_columns
+                case _:
+                    return False
+
+    def _any_frame(
+        self,
+        args: list[ast.expr],
+        keywords: list[ast.keyword],
+        predicate: Callable[[ast.expr], bool],
+    ) -> bool:
+        """Whether `predicate` holds for a frame passed in `args`/`keywords`."""
+        for value in [*args, *(kw.value for kw in keywords)]:
             elements = (
                 value.elts if isinstance(value, (ast.List, ast.Tuple)) else [value]
             )
-            if any(self._index_may_be_named(e) for e in elements):
+            if any(predicate(e) for e in elements):
                 return True
         return False
+
+    def _melt_var_name_from_columns(self, call: ast.Call, offset: int) -> bool:
+        """
+        Whether `melt` takes its variable column name from the columns axis.
+
+        That is when `var_name` is omitted or None. `offset` is the number
+        of positional arguments before `id_vars` (1 for `pd.melt(df, ...)`).
+        """
+        var_name = _keyword(call, "var_name")
+        if var_name is None and len(call.args) > offset + 2:
+            var_name = call.args[offset + 2]
+        return var_name is None or get_result(var_name, self.definitions) is None
 
     def _may_have_named_index(self, call: ast.Call) -> bool:
         """Whether a frame used in `call` may have a named index."""
@@ -1282,6 +1410,8 @@ class Checker(ast.NodeVisitor):
         names = get_result(value, self.definitions)
         if isinstance(names, list) and all(isinstance(n, str) for n in names):
             tracker.set_columns({n for n in names if isinstance(n, str)})
+            # A new flat, unnamed columns axis
+            self._named_columns.discard(df_name)
         else:
             del self.dfs[df_name]
 
@@ -1328,17 +1458,18 @@ class Checker(ast.NodeVisitor):
         self._merge_states(names, before, live)
 
     def _save_state(self, names: set[str]) -> _State:
-        """The trackers, definitions and named-index flags of `names`."""
+        """The trackers, definitions and named-axis flags of `names`."""
         return (
             {name: self.dfs.get(name) for name in names},
             {name: self.definitions.get(name, _MISSING) for name in names},
             names & self._named_index,
+            names & self._named_columns,
         )
 
     def _load_state(self, names: set[str], state: _State) -> None:
         """Make `state` current for `names`, with copies of its trackers."""
         dfs, definitions, named = self.dfs, self.definitions, self._named_index
-        trackers, values, named_names = state
+        trackers, values, named_names, named_columns_names = state
         for name, tracker in trackers.items():
             if tracker is None:
                 dfs.pop(name, None)
@@ -1351,6 +1482,8 @@ class Checker(ast.NodeVisitor):
                 definitions[name] = value
         named -= names
         named |= named_names
+        self._named_columns -= names
+        self._named_columns |= named_columns_names
 
     def _merge_states(
         self, names: set[str], before: _State, states: list[_State]
@@ -1361,10 +1494,12 @@ class Checker(ast.NodeVisitor):
         A frame keeps the union of its columns, if it's tracked in every
         state; `before`'s tracker (the one held before the alternatives
         diverged) is reused. A definition is kept if it's the same in every
-        state, and an index may be named if it may be in any.
+        state, and an index or columns axis may be named if it may be in any.
         """
         dfs, definitions, named = self.dfs, self.definitions, self._named_index
+        named_columns = self._named_columns
         named -= names
+        named_columns -= names
         for name in names:
             trackers = [state[0][name] for state in states]
             dfs.pop(name, None)
@@ -1381,6 +1516,7 @@ class Checker(ast.NodeVisitor):
                 definitions[name] = first
         for state in states:
             named |= state[2]
+            named_columns |= state[3]
 
     def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
         """Visit a for loop; see `_visit_loop_body`."""
@@ -1527,7 +1663,28 @@ class Checker(ast.NodeVisitor):
         if (name := self._inplace_index_naming(node.value)) is not None:
             self._named_index.add(name)
         self._try_dataframe_method(node.value, target=None)
+        self._apply_inplace_axis_rename(node.value)
         self.generic_visit(node)
+
+    def _apply_inplace_axis_rename(self, expr: ast.expr) -> None:
+        """
+        Record in-place renames of a frame's columns axis.
+
+        `df.rename_axis(columns="n", inplace=True)` and
+        `df.columns.set_names("n", inplace=True)` (or `.rename`).
+        """
+        match expr:
+            case ast.Call(
+                func=ast.Attribute(value=ast.Name(id=name), attr="rename_axis")
+            ):
+                self._named_columns.add(name)
+            case ast.Call(
+                func=ast.Attribute(
+                    value=ast.Attribute(value=ast.Name(id=name), attr="columns"),
+                    attr="set_names" | "rename",
+                )
+            ):
+                self._named_columns.add(name)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """
@@ -1552,6 +1709,9 @@ class Checker(ast.NodeVisitor):
         for target in node.targets:
             if (name := _index_attribute_root(target)) is not None:
                 self._named_index.add(name)
+            # df.columns.name = ...: melt names its variable column after it
+            if (name := _columns_axis_root(target)) is not None:
+                self._named_columns.add(name)
 
         # Label-based indexer assignment: df.loc[rows, "col"] = v, df.at[i, "col"] = v
         if indexer_targets := [t for t in node.targets if _indexer_target(t)]:
@@ -1608,9 +1768,12 @@ class Checker(ast.NodeVisitor):
                 or _reshapes(node.value)
             ):
                 del self.dfs[var_name]
-            elif var_name in self.dfs and self._index_may_be_named(node.value):
+            elif var_name in self.dfs:
                 # e.g. df = df.set_index("a"): still tracked, index now named
-                self._named_index.add(var_name)
+                if self._index_may_be_named(node.value):
+                    self._named_index.add(var_name)
+                if self._columns_may_be_named(node.value):
+                    self._named_columns.add(var_name)
 
         # Unpacking into columns: df["a"], df["b"] = ...
         if len(node.targets) == 1 and isinstance(

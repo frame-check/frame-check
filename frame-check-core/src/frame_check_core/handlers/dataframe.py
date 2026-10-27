@@ -669,8 +669,9 @@ def melt_columns(
             available=sorted(columns) if label is not None else None,
         )
 
-    # The default variable name is the name of the columns index, which is
-    # unnamed unless set explicitly (df.columns.name = ...)
+    # The default variable name is the name of the columns axis ("variable"
+    # when unnamed). The checker drops the result when the axis may be named
+    # or a MultiIndex (see Checker._columns_may_be_named).
     var_name = keywords.get("var_name", "variable")
     if var_name is None:
         var_name = "variable"
