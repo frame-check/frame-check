@@ -163,17 +163,67 @@ def f(c):
     assert len(checker.diagnostics) == 1
 
 
-def test_continue_and_break_are_excluded():
+def test_continue_branch_stays_in_the_merge():
+    """B exists from the next iteration on, so reading it isn't an error."""
+    checker = check("""
+df = pd.DataFrame({"A": [1]})
+for i in range(3):
+    if i == 0:
+        df["B"] = 1
+        continue
+    x = df["B"]
+""")
+    assert checker.diagnostics == []
+
+
+def test_break_branch_stays_in_the_merge():
+    """The column added before `break` exists after the loop."""
+    checker = check("""
+df = pd.DataFrame({"A": [1]})
+for i in range(3):
+    if i == 0:
+        df["B"] = 1
+        break
+print(df["B"])
+""")
+    assert checker.diagnostics == []
+
+
+def test_raise_inside_try_stays_in_the_merge():
+    """A caught `raise` continues in the handler, where the column exists."""
+    checker = check("""
+df = pd.DataFrame({"A": [1]})
+try:
+    if len(df):
+        df["B"] = 1
+        raise KeyError
+    df["C"] = 1
+except KeyError:
+    print(df["B"])
+""")
+    assert checker.diagnostics == []
+
+
+def test_raise_inside_with_stays_in_the_merge():
+    """A `with` block may swallow the exception (pytest.raises, suppress)."""
+    checker = check("""
+df = pd.DataFrame({"A": [1]})
+with suppress(KeyError):
+    if c:
+        df["B"] = 1
+        raise KeyError
+print(df["B"])
+""")
+    assert checker.diagnostics == []
+
+
+def test_missing_column_after_skip_branches_is_still_reported():
     checker = check("""
 df = pd.DataFrame({"A": [1]})
 for i in range(3):
     if c:
-        df["B"] = 1
         continue
-    elif d:
-        df["C"] = 1
-        break
-    x = df["B"]
+    x = df["Z"]
 """)
     assert len(checker.diagnostics) == 1
 

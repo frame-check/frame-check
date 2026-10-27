@@ -42,9 +42,6 @@ from frame_check_core.handlers import pandas as _pandas  # noqa: F401
 from frame_check_core.handlers.models import DF, PD, Result, get_result
 from frame_check_core.tracker import Relaxed, Strict, Tracker
 
-# Statements after which control doesn't continue with the next one
-_EXITS = (ast.Return, ast.Raise, ast.Continue, ast.Break)
-
 # Marks a name that has no definition (None is a valid definition)
 _MISSING: Any = object()
 
@@ -297,6 +294,9 @@ class Checker(ast.NodeVisitor):
         self._bound: set[str] = set()
         # Enclosing-scope frames whose diagnostics are suppressed (see _report)
         self._quiet: set[str] = set()
+        # Depth of enclosing try/with blocks, where a `raise` may be caught
+        # (try handlers, pytest.raises, contextlib.suppress) and continue
+        self._may_be_caught = 0
 
     @classmethod
     def check(cls, code: str | Path | ast.Module) -> Self:
@@ -1098,10 +1098,10 @@ class Checker(ast.NodeVisitor):
         A frame's columns after the `if` are the union of its columns in every
         branch that can fall through (a missing `else` is an empty branch). A
         frame that isn't tracked in all of them is not tracked afterwards, as
-        its schema is unknown. Branches ending in `return`, `raise`,
-        `continue` or `break` don't reach the code after the `if`, so they
-        are left out of the merge. Diagnostics inside a branch are reported
-        against that branch's own state.
+        its schema is unknown. Branches that certainly don't reach the code
+        after the `if` (a `return`, or a `raise` outside any try/with) are
+        left out of the merge; see `_branch_exits`. Diagnostics inside a
+        branch are reported against that branch's own state.
 
         Only names mentioned in the branches can change, so only those are
         saved, restored and merged.
@@ -1141,7 +1141,7 @@ class Checker(ast.NodeVisitor):
                 self.visit(stmt)
             outcomes.append(
                 (
-                    bool(branch) and isinstance(branch[-1], _EXITS),
+                    self._branch_exits(branch),
                     {name: dfs.get(name) for name in names},
                     {name: definitions.get(name, _MISSING) for name in names},
                     names & named,
@@ -1169,6 +1169,36 @@ class Checker(ast.NodeVisitor):
                 definitions[name] = first  # type: ignore[assignment]
         for outcome in live:
             named |= outcome[3]
+
+    def _branch_exits(self, branch: list[ast.stmt]) -> bool:
+        """
+        Whether control certainly doesn't reach the code after the `if`.
+
+        Only `return`, and `raise` outside any try/with block. A `raise` that
+        may be caught, `break` (continues after the loop) and `continue`
+        (next iteration) can still reach code that reads the frame, so those
+        branches stay in the merge; merging more outcomes only widens it.
+        """
+        if not branch:
+            return False
+        match branch[-1]:
+            case ast.Return():
+                return True
+            case ast.Raise():
+                return self._may_be_caught == 0
+        return False
+
+    def visit_Try(self, node: ast.Try | ast.TryStar) -> None:
+        """Visit a try statement, where a `raise` may be caught."""
+        self._may_be_caught += 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._may_be_caught -= 1
+
+    visit_TryStar = visit_Try
+    visit_With = visit_Try  # type: ignore[assignment]
+    visit_AsyncWith = visit_Try  # type: ignore[assignment]
 
     def _merge_trackers(
         self,
