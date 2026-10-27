@@ -45,6 +45,28 @@ from frame_check_core.tracker import Relaxed, Strict, Tracker
 # Marks a name that has no definition (None is a valid definition)
 _MISSING: Any = object()
 
+# Most quiet passes over the outermost loop body (see _visit_loop_body)
+_LOOP_PASSES = 3
+
+# The trackers, definitions and named-index flags of some names
+type _State = tuple[
+    dict[str, Tracker[Strict] | Tracker[Relaxed] | None], dict[str, Any], set[str]
+]
+
+
+def _state_signature(state: _State) -> tuple[object, ...]:
+    """
+    A summary of `state` that changes whenever a merge widens it.
+
+    Merging only adds columns and drops trackers and definitions.
+    """
+    trackers, values, named = state
+    return (
+        {name: len(t.columns) for name, t in trackers.items() if t is not None},
+        {name for name, value in values.items() if value is not _MISSING},
+        named,
+    )
+
 
 def format_diagnostic(
     diag: diagnostic.Diagnostic,
@@ -297,6 +319,8 @@ class Checker(ast.NodeVisitor):
         # Depth of enclosing try/with blocks, where a `raise` may be caught
         # (try handlers, pytest.raises, contextlib.suppress) and continue
         self._may_be_caught = 0
+        # Depth of enclosing loops (see _visit_loop_body)
+        self._loop_depth = 0
 
     @classmethod
     def check(cls, code: str | Path | ast.Module) -> Self:
@@ -1118,57 +1142,154 @@ class Checker(ast.NodeVisitor):
             for child in ast.walk(stmt)
             if type(child) is ast.Name
         }
-        dfs, definitions, named = self.dfs, self.definitions, self._named_index
-        before_dfs = {name: dfs.get(name) for name in names}
-        before_defs = {name: definitions.get(name, _MISSING) for name in names}
-        before_named = names & named
-
+        before = self._save_state(names)
         outcomes = []
         for branch in branches:
-            for name, tracker in before_dfs.items():
-                if tracker is None:
-                    dfs.pop(name, None)
-                else:
-                    dfs[name] = tracker.copy()
-            for name, value in before_defs.items():
-                if value is _MISSING:
-                    definitions.pop(name, None)
-                else:
-                    definitions[name] = value
-            named -= names
-            named |= before_named
+            self._load_state(names, before)
             for stmt in branch:
                 self.visit(stmt)
-            outcomes.append(
-                (
-                    self._branch_exits(branch),
-                    {name: dfs.get(name) for name in names},
-                    {name: definitions.get(name, _MISSING) for name in names},
-                    names & named,
-                )
-            )
+            outcomes.append((self._branch_exits(branch), self._save_state(names)))
 
         # Branches that exit don't flow on; if none flows on, the code after
         # the `if` is unreachable and any merge will do
-        live = [outcome for outcome in outcomes if not outcome[0]] or outcomes
+        live = [state for exits, state in outcomes if not exits] or [
+            state for _, state in outcomes
+        ]
+        self._merge_states(names, before, live)
 
+    def _save_state(self, names: set[str]) -> _State:
+        """The trackers, definitions and named-index flags of `names`."""
+        return (
+            {name: self.dfs.get(name) for name in names},
+            {name: self.definitions.get(name, _MISSING) for name in names},
+            names & self._named_index,
+        )
+
+    def _load_state(self, names: set[str], state: _State) -> None:
+        """Make `state` current for `names`, with copies of its trackers."""
+        dfs, definitions, named = self.dfs, self.definitions, self._named_index
+        trackers, values, named_names = state
+        for name, tracker in trackers.items():
+            if tracker is None:
+                dfs.pop(name, None)
+            else:
+                dfs[name] = tracker.copy()
+        for name, value in values.items():
+            if value is _MISSING:
+                definitions.pop(name, None)
+            else:
+                definitions[name] = value
+        named -= names
+        named |= named_names
+
+    def _merge_states(
+        self, names: set[str], before: _State, states: list[_State]
+    ) -> None:
+        """
+        Make the merge of the alternative `states` of `names` current.
+
+        A frame keeps the union of its columns, if it's tracked in every
+        state; `before`'s tracker (the one held before the alternatives
+        diverged) is reused. A definition is kept if it's the same in every
+        state, and an index may be named if it may be in any.
+        """
+        dfs, definitions, named = self.dfs, self.definitions, self._named_index
         named -= names
         for name in names:
-            trackers = [outcome[1][name] for outcome in live]
+            trackers = [state[0][name] for state in states]
             dfs.pop(name, None)
             if None not in trackers:
-                self._merge_trackers(name, before_dfs[name], trackers)  # type: ignore[arg-type]
+                self._merge_trackers(name, before[0][name], trackers)  # type: ignore[arg-type]
 
-            values = [outcome[2][name] for outcome in live]
+            values = [state[1][name] for state in states]
             definitions.pop(name, None)
             first = values[0]
             if first is not _MISSING and all(
                 value is first or (value is not _MISSING and value == first)
                 for value in values
             ):
-                definitions[name] = first  # type: ignore[assignment]
-        for outcome in live:
-            named |= outcome[3]
+                definitions[name] = first
+        for state in states:
+            named |= state[2]
+
+    def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
+        """Visit a for loop; see `_visit_loop_body`."""
+        self.visit(node.iter)
+        self.visit(node.target)
+        self._visit_loop_body(node.body)
+        for stmt in node.orelse:
+            self.visit(stmt)
+
+    visit_AsyncFor = visit_For
+
+    def visit_While(self, node: ast.While) -> None:
+        """Visit a while loop; see `_visit_loop_body`."""
+        self.visit(node.test)
+        self._visit_loop_body(node.body)
+        for stmt in node.orelse:
+            self.visit(stmt)
+
+    def _visit_loop_body(self, body: list[ast.stmt]) -> None:
+        """
+        Visit a loop body, starting from the state any iteration may start in.
+
+        A later iteration sees what earlier ones did, e.g. a column the
+        first iteration adds in an `if` branch that a later one reads in
+        the `else`. So the body is first visited quietly, and what it does
+        is merged into the state before the loop, like the branches of an
+        `if` (an iteration may or may not have run). The body is then
+        visited for real from that widened state, reporting each problem
+        once.
+
+        A quiet pass from which a write failed (a missing dependency) is
+        repeated from the widened state, up to `_LOOP_PASSES` times, since
+        the column may exist on a later iteration. Only the outermost loop
+        does quiet passes, which already cover the loops nested in it, so
+        nesting doesn't multiply the cost.
+        """
+        if self._loop_depth == 0:
+            self._widen_for_loop(body)
+        self._loop_depth += 1
+        try:
+            for stmt in body:
+                self.visit(stmt)
+        finally:
+            self._loop_depth -= 1
+
+    def _widen_for_loop(self, body: list[ast.stmt]) -> None:
+        """Widen the current state with the effects of `body`; see `_visit_loop_body`."""
+        nodes = [child for stmt in body for child in ast.walk(stmt)]
+        names = {child.id for child in nodes if type(child) is ast.Name}
+        if names.isdisjoint(self.dfs):
+            # Loops that don't mention a tracked frame can't widen one
+            return
+        node_ids = {id(child) for child in nodes}
+        current = self._save_state(names)
+        self._loop_depth += 1
+        try:
+            for _ in range(_LOOP_PASSES):
+                mark = len(self.diagnostics)
+                self._load_state(names, current)
+                for stmt in body:
+                    self.visit(stmt)
+                after = self._save_state(names)
+
+                # Forget the quiet pass: its diagnostics, and the per-node
+                # caches that would stop the real pass from reporting them
+                failed = len(self.diagnostics) > mark
+                del self.diagnostics[mark:]
+                for key in node_ids:
+                    self._frames.pop(key, None)
+                    self._evaluated_calls.discard(key)
+                    self._skip_subscripts.discard(key)
+
+                signature = _state_signature(current)
+                self._merge_states(names, current, [current, after])
+                current = self._save_state(names)
+                if not failed or _state_signature(current) == signature:
+                    break
+        finally:
+            self._loop_depth -= 1
 
     def _branch_exits(self, branch: list[ast.stmt]) -> bool:
         """
