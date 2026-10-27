@@ -160,6 +160,8 @@ NO_ERROR_QUERIES = [
     "`A` > 0",
     "index > 0",
     "ilevel_0 > 0",
+    "A > columns.size",
+    "A > 0 and clevel_0.size > 0",
     "A > 1 and not B < 2",
     "A.isin([1, 2])",
     "A > A.mean()",

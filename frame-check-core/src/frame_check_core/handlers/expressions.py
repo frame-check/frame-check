@@ -22,8 +22,9 @@ _LOCAL = "__fc_local__"
 _QUOTED = "__fc_quoted_"
 
 # Names that pandas resolves without a column of that name
-_IMPLICIT_NAMES = frozenset({"index", "inf", "Inf"})
-_LEVEL_NAME = re.compile(r"ilevel_\d+")
+# (`columns`, and `ilevel_N`/`clevel_N` for index/column levels)
+_IMPLICIT_NAMES = frozenset({"index", "columns", "inf", "Inf"})
+_LEVEL_NAME = re.compile(r"[ic]level_\d+")
 
 # Constructs pandas rejects or that bind names we don't model: give up on them
 _UNSUPPORTED = (
