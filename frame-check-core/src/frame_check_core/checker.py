@@ -223,6 +223,77 @@ _INDEX_CHANGING_METHODS = frozenset(
 )
 
 
+# Readers of formats that store the index with its names and restore it
+_INDEX_RESTORING_READERS = frozenset(
+    {"read_parquet", "read_feather", "read_hdf", "read_pickle", "read_orc"}
+)
+
+# Constructors whose data may be Series (or frames) carrying a named index
+_DATA_CONSTRUCTORS = frozenset(
+    {"DataFrame", "DataFrame.from_dict", "DataFrame.from_records"}
+)
+
+# In-place methods of `df.index` that may name it
+_INDEX_NAMING_METHODS = frozenset({"rename", "set_names"})
+
+
+# Builtins and numpy constructors returning plain sequences or arrays,
+# which carry no index whatever their arguments
+_INDEX_FREE_BUILTINS = frozenset({"list", "tuple", "range", "sorted", "set", "dict"})
+_INDEX_FREE_NUMPY = frozenset(
+    {"array", "asarray", "arange", "zeros", "ones", "full", "linspace", "empty"}
+)
+
+
+def _index_free(value: ast.expr) -> bool:
+    """
+    Whether a constructor data value certainly carries no index.
+
+    Literals, displays, comprehensions and plain sequences have none, so the
+    frame gets an unnamed default index. Any other value (a variable, a
+    call) may be a Series with a named index, which pandas keeps:
+    `pd.DataFrame({"a": s})` is indexed like `s`.
+    """
+    match value:
+        case (
+            ast.Constant()
+            | ast.List()
+            | ast.Tuple()
+            | ast.Set()
+            | ast.Dict()
+            | ast.ListComp()
+            | ast.SetComp()
+            | ast.DictComp()
+            | ast.GeneratorExp()
+        ):
+            return True
+        case ast.UnaryOp(operand=operand):
+            return _index_free(operand)
+        case ast.BinOp(left=left, right=right):
+            return _index_free(left) and _index_free(right)
+        case ast.Call(func=ast.Name(id=name)):
+            return name in _INDEX_FREE_BUILTINS
+        case ast.Call(func=ast.Attribute(value=ast.Name(id="np" | "numpy"), attr=name)):
+            return name in _INDEX_FREE_NUMPY
+        case ast.Call(
+            func=ast.Attribute(
+                value=ast.Attribute(value=ast.Name(id="np" | "numpy"), attr="random")
+            )
+        ):
+            return True
+    return False
+
+
+def _known_data(value: Result) -> bool:
+    """`_index_free` for a resolved variable value (`data = {"a": [1]}`)."""
+    match value:
+        case str() | bool() | int() | None | list():
+            return True
+        case dict():
+            return all(_known_data(v) for v in value.values())
+    return False
+
+
 def _unnamed_index(value: ast.expr) -> bool:
     """Whether an `index=` argument certainly has no name (a literal, range)."""
     match value:
@@ -856,7 +927,9 @@ class Checker(ast.NodeVisitor):
         Its index levels can then be used as keys in groupby, merge, join or
         sort_values, and reset_index adds columns named after them. The
         index isn't tracked, so this is conservative: a constructor with a
-        non-literal `index=`, `read_*(index_col=...)`, an index-changing
+        non-literal `index=` or data that may be a Series
+        (`pd.DataFrame({"a": s})`), `read_*(index_col=...)`, readers of
+        formats storing the index (parquet, pickle, ...), an index-changing
         method, or any frame derived from such a frame.
 
         Only the frame's spine is walked (the receiver chain down to its
@@ -893,6 +966,20 @@ class Checker(ast.NodeVisitor):
         self, name: str, args: list[ast.expr], keywords: list[ast.keyword]
     ) -> bool:
         """`_index_may_be_named` for a pandas function call."""
+        if name in _INDEX_RESTORING_READERS:
+            return True
+        if name == "read_json":
+            # orient="table" restores the index with its names
+            orient = next((kw.value for kw in keywords if kw.arg == "orient"), None)
+            if orient is not None and not (
+                isinstance(orient, ast.Constant) and orient.value != "table"
+            ):
+                return True
+        if name in _DATA_CONSTRUCTORS:
+            data = args[0] if args else None
+            data = next((kw.value for kw in keywords if kw.arg == "data"), data)
+            if data is not None and self._data_may_name_index(data):
+                return True
         index_args = {kw.arg: kw.value for kw in keywords}
         if name == "DataFrame" and len(args) > 1:
             index_args["index"] = args[1]
@@ -902,6 +989,52 @@ class Checker(ast.NodeVisitor):
                 return True
         # Built from other frames: pd.DataFrame(df), pd.merge(a, b), pd.concat([a, b])
         return self._any_named_frame(args, keywords)
+
+    @staticmethod
+    def _inplace_index_naming(expr: ast.expr) -> str | None:
+        """
+        The frame whose index an in-place call may name, if it is one.
+
+        `df.index.rename("k", inplace=True)`, `df.index.set_names(...,
+        inplace=True)`, `df.rename_axis("k", inplace=True)`, ...
+        """
+        match expr:
+            case ast.Call(func=ast.Attribute(value=receiver, attr=method)):
+                pass
+            case _:
+                return None
+        inplace = next((kw.value for kw in expr.keywords if kw.arg == "inplace"), None)
+        if inplace is None or (
+            isinstance(inplace, ast.Constant) and inplace.value is False
+        ):
+            return None
+        if method in _INDEX_NAMING_METHODS:
+            return _index_attribute_root(receiver)
+        if method in _INDEX_CHANGING_METHODS and isinstance(receiver, ast.Name):
+            return receiver.id
+        return None
+
+    def _data_may_name_index(self, data: ast.expr) -> bool:
+        """
+        Whether constructor `data` may give the frame a named index.
+
+        Literals and plain sequences can't; values taken from tracked frames (`df`,
+        `{"a": df["x"]}`) carry the frame's index; anything else may be a
+        Series with a named index.
+        """
+        match data:
+            case ast.Dict(keys=keys, values=values):
+                # A dict of columns is indexed like its Series values
+                return None in keys or any(self._data_may_name_index(v) for v in values)
+            case ast.Name(id=name) if name not in self.dfs:
+                return not (
+                    name in self.definitions and _known_data(self.definitions[name])
+                )
+        if _index_free(data):
+            return False
+        if _root_name(data) in self.dfs:
+            return self._index_may_be_named(data)
+        return True
 
     def _any_named_frame(
         self, args: list[ast.expr], keywords: list[ast.keyword]
@@ -918,6 +1051,12 @@ class Checker(ast.NodeVisitor):
 
     def _may_have_named_index(self, call: ast.Call) -> bool:
         """Whether a frame used in `call` may have a named index."""
+        # The receiver, untracked as a variable when inline:
+        # pd.read_parquet(...).query(...), df.rename_axis("k").query(...)
+        if isinstance(call.func, ast.Attribute) and self._index_may_be_named(
+            call.func.value
+        ):
+            return True
         return any(
             isinstance(node, ast.Name) and node.id in self._named_index
             for node in ast.walk(call)
@@ -1356,6 +1495,8 @@ class Checker(ast.NodeVisitor):
         Args:
             node: The expression statement AST node.
         """
+        if (name := self._inplace_index_naming(node.value)) is not None:
+            self._named_index.add(name)
         self._try_dataframe_method(node.value, target=None)
         self.generic_visit(node)
 
