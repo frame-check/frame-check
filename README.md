@@ -168,6 +168,9 @@ Each component should then have a README.md file with instructions on how to run
 | <a id="CAM-19"></a>CAM-19 | Transform Operations     | df['B'] = df['A'].apply(lambda x: x*2)                | Creates columns from transformations applied to existing columns.                                                                   | ✅          |
 | <a id="CAM-20"></a>CAM-20 | Expanding Columns        | df[['A','B']] = df['combined'].str.split(expand=True) | Creates multiple columns from string operations that expand data.                                                                   | ✅          |
 | <a id="CAM-21"></a>CAM-21 | From Groupby             | df['new'] = df.groupby('A')['B'].transform('mean')    | Creates columns containing aggregated results broadcast back to the original DataFrame's shape.                                     | ✅          |
+| <a id="CAM-22"></a>CAM-22 | From Pivot               | df.pivot(columns='A')                                 | Creates multiple columns through pivot operations that reshape the DataFrame.                                                       | ✅          |
+| <a id="CAM-23"></a>CAM-23 | From Unstack             | df = df.unstack()                                     | Converts index levels to columns in a multi-index DataFrame.                                                                        | ✅          |
+| <a id="CAM-24"></a>CAM-24 | From Pd.Get_Dummies      | df = pd.get_dummies(df, columns=['A'])                | Creates multiple binary indicator columns from categorical columns.                                                                 | ✅          |
 | <a id="CAM-25"></a>CAM-25 | Update Method            | df.update(other_df[['A']])                            | Updates existing columns with values from another DataFrame.                                                                        | ✅          |
 
 ### column_removal_methods
@@ -187,13 +190,16 @@ Each component should then have a README.md file with instructions on how to run
 
 ### edge_cases
 
-| id                      | title                      | code                                                      | description                                                               | supported   |
-|:------------------------|:---------------------------|:----------------------------------------------------------|:--------------------------------------------------------------------------|:------------|
-| <a id="EC-2"></a>EC-2   | Rename Operations          | df = df.rename(columns={'old': 'new'})                    | Changes column names while preserving their data and position.            | ✅          |
-| <a id="EC-3"></a>EC-3   | Set Operations             | df.columns = ['A', 'B', 'C']                              | Completely replaces the column structure with a new set of names.         | ✅          |
-| <a id="EC-4"></a>EC-4   | Arithmetic Operations      | df['C'] = df['A'] + df['B']                               | Creates new columns through arithmetic operations on existing columns.    | ✅          |
-| <a id="EC-5"></a>EC-5   | String Accessor            | df[['first', 'last']] = df['name'].str.split(expand=True) | Expands string content into multiple new columns.                         | ✅          |
-| <a id="EC-10"></a>EC-10 | Column Assignment In Chain | df.assign(B=1).assign(C=lambda x: x['B']*2)               | Creates columns that depend on columns created earlier in the same chain. | ✅          |
+| id                      | title                      | code                                                              | description                                                                   | supported   |
+|:------------------------|:---------------------------|:------------------------------------------------------------------|:------------------------------------------------------------------------------|:------------|
+| <a id="EC-2"></a>EC-2   | Rename Operations          | df = df.rename(columns={'old': 'new'})                            | Changes column names while preserving their data and position.                | ✅          |
+| <a id="EC-3"></a>EC-3   | Set Operations             | df.columns = ['A', 'B', 'C']                                      | Completely replaces the column structure with a new set of names.             | ✅          |
+| <a id="EC-4"></a>EC-4   | Arithmetic Operations      | df['C'] = df['A'] + df['B']                                       | Creates new columns through arithmetic operations on existing columns.        | ✅          |
+| <a id="EC-5"></a>EC-5   | String Accessor            | df[['first', 'last']] = df['name'].str.split(expand=True)         | Expands string content into multiple new columns.                             | ✅          |
+| <a id="EC-7"></a>EC-7   | Pivot Operations           | df.pivot_table(index='date', columns='category', values='amount') | Dramatically reshapes the column structure based on unique values.            | ✅          |
+| <a id="EC-8"></a>EC-8   | Stack/Unstack              | df = df.stack().unstack(level=0)                                  | Converts between index levels and columns, potentially changing column names. | ✅          |
+| <a id="EC-9"></a>EC-9   | Transpose                  | df = df.T                                                         | Swaps rows and columns, turning row indices into column names.                | ✅          |
+| <a id="EC-10"></a>EC-10 | Column Assignment In Chain | df.assign(B=1).assign(C=lambda x: x['B']*2)                       | Creates columns that depend on columns created earlier in the same chain.     | ✅          |
 
 Note: the full list of supported features can be found [here](https://frame-check.github.io/frame-check/features/).
 

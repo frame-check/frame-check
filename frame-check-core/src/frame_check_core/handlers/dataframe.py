@@ -596,3 +596,192 @@ def df_groupby(
     if isinstance(by, str) and keywords.get("level") is None and by not in columns:
         error = IllegalAccess(missing=[by])
     return columns, None, error
+
+
+# Positional parameters of DataFrame.melt / pd.melt (after the frame)
+MELT_PARAMS = (
+    "id_vars",
+    "value_vars",
+    "var_name",
+    "value_name",
+    "col_level",
+    "ignore_index",
+)
+
+
+def _label_list(value: Result) -> tuple[list[str], bool]:
+    """
+    Resolve a label-list argument (`None`, `"A"` or `["A", "B"]`).
+
+    Returns the string labels and whether every label was resolved. A label
+    that isn't a string (an int, a variable we can't resolve, a tuple key)
+    makes the list incomplete.
+    """
+    match value:
+        case None:
+            return [], True
+        case str():
+            return [value], True
+        case list():
+            labels = [v for v in value if isinstance(v, str)]
+            return labels, len(labels) == len(value)
+        case _:
+            return [], False
+
+
+def melt_columns(
+    columns: set[str],
+    label: str | None,
+    keywords: dict[str, Result],
+) -> tuple[set[str] | None, IllegalAccess | None]:
+    """
+    Compute the columns of `df.melt(...)` (and `pd.melt`).
+
+    The result is the `id_vars`, then the variable and value columns
+    (`var_name` / `value_name`, default "variable" / "value"). Labels of
+    `id_vars` and `value_vars` missing from the frame raise KeyError.
+
+    Args:
+        columns: Columns of the melted frame.
+        label: Label of the frame for diagnostics, or None when it is the
+            frame the method is called on.
+        keywords: The arguments by name (see `bind_positional`).
+
+    Returns:
+        The melted columns (None when they can't be determined statically)
+        and an error for missing labels, if any.
+    """
+    if UNPACKED in keywords:
+        return None, None
+    if keywords.get("col_level") is not None:
+        # Melts one level of MultiIndex columns
+        return None, None
+
+    ids, ids_known = _label_list(keywords.get("id_vars"))
+    values, _ = _label_list(keywords.get("value_vars"))
+
+    missing = list(dict.fromkeys(c for c in (*ids, *values) if c not in columns))
+    error = None
+    if missing:
+        error = IllegalAccess(
+            missing=missing,
+            frame=label,
+            available=sorted(columns) if label is not None else None,
+        )
+
+    # The default variable name is the name of the columns axis ("variable"
+    # when unnamed). The checker drops the result when the axis may be named
+    # or a MultiIndex (see Checker._columns_may_be_named).
+    var_name = keywords.get("var_name", "variable")
+    if var_name is None:
+        var_name = "variable"
+    value_name = keywords.get("value_name", "value")
+    if not (ids_known and isinstance(var_name, str) and isinstance(value_name, str)):
+        # A label list or a None value_name (NaN column) isn't a plain label
+        return None, error
+    if len({*ids, var_name, value_name}) < len(ids) + 2:
+        # A repeated label: duplicate columns before pandas 3.1, ValueError since
+        return None, error
+    return {*ids, var_name, value_name}, error
+
+
+@DF.register("melt")
+def df_melt(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, MELT_PARAMS)
+    melted, error = melt_columns(columns, None, params)
+    return columns, melted, error
+
+
+def reshape_error(
+    columns: set[str], label: str | None, labels: list[str]
+) -> IllegalAccess | None:
+    """Report the `labels` missing from `columns` (a KeyError at runtime)."""
+    missing = list(dict.fromkeys(c for c in labels if c not in columns))
+    if not missing:
+        return None
+    return IllegalAccess(
+        missing=missing,
+        frame=label,
+        available=sorted(columns) if label is not None else None,
+    )
+
+
+def pivot_error(
+    columns: set[str], label: str | None, keywords: dict[str, Result]
+) -> IllegalAccess | None:
+    """
+    Validate the labels of `df.pivot(index=, columns=, values=)`.
+
+    A string or a list of strings in any of them must be a column: unlike
+    pivot_table, an index level name isn't accepted.
+    """
+    if UNPACKED in keywords:
+        return None
+    labels = [
+        name
+        for key in ("index", "columns", "values")
+        for name in _label_list(keywords.get(key))[0]
+    ]
+    return reshape_error(columns, label, labels)
+
+
+# Positional parameters of DataFrame.pivot_table / pd.pivot_table (after the frame)
+PIVOT_TABLE_PARAMS = ("values", "index", "columns")
+
+
+def pivot_table_error(
+    columns: set[str], label: str | None, keywords: dict[str, Result]
+) -> IllegalAccess | None:
+    """
+    Validate the labels of `df.pivot_table(values=, index=, columns=)`.
+
+    `values` and `index` take a string or a list of strings that must be
+    columns, and so does a string `columns`. An unknown label in a list
+    `columns` raises a KeyError too, but the list is conservatively left
+    unchecked. (pandas groups by `index + columns`, and when that key list
+    is exactly as long as the frame and not all of its labels are columns,
+    it is used as an array of group labels instead and nothing is raised.
+    The row count isn't known statically; this degenerate case is accepted
+    for `index`.) Callers must also drop the error when the frame may have
+    a named index, since `index` and `columns` accept index level names.
+    """
+    if UNPACKED in keywords:
+        return None
+    labels = [
+        *_label_list(keywords.get("index"))[0],
+        *(c for c in [keywords.get("columns")] if isinstance(c, str)),
+        *_label_list(keywords.get("values"))[0],
+    ]
+    return reshape_error(columns, label, labels)
+
+
+# The columns of these results come from the data (the values of the pivoted
+# columns), so the result is unknown. Only the labels are validated.
+
+
+@DF.register("pivot")
+def df_pivot(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    return columns, None, pivot_error(columns, None, keywords)
+
+
+@DF.register("pivot_table")
+def df_pivot_table(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    params = bind_positional(args, keywords, PIVOT_TABLE_PARAMS)
+    return columns, None, pivot_table_error(columns, None, params)
+
+
+# The result is a Series, or a frame whose columns are the values of an index
+# level (or the old index), so it is unknown.
+@DF.register("stack")
+@DF.register("unstack")
+@DF.register("transpose")
+def df_unknown_columns(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    return columns, None, None
