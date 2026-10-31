@@ -679,6 +679,9 @@ def melt_columns(
     if not (ids_known and isinstance(var_name, str) and isinstance(value_name, str)):
         # A label list or a None value_name (NaN column) isn't a plain label
         return None, error
+    if len({*ids, var_name, value_name}) < len(ids) + 2:
+        # A repeated label: duplicate columns before pandas 3.1, ValueError since
+        return None, error
     return {*ids, var_name, value_name}, error
 
 

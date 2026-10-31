@@ -41,7 +41,6 @@ MELT_CASES = [
     "df.melt(id_vars=None, value_vars=None)",
     'df.melt(id_vars="id", var_name="k", value_name="v")',
     'df.melt(id_vars="id", var_name=None)',
-    'df.melt(id_vars="id", var_name="id")',
     'df.melt(id_vars="id", ignore_index=False)',
     'df.melt("id", ["a"], "k", "v")',
     'df.melt(id_vars=["a"], value_vars=["a", "b"])',
@@ -75,6 +74,19 @@ def test_melt_with_missing_label_is_reported(expr: str, message: str):
     fc = Checker.check(SETUP + f"out = {expr}\n")
     assert len(fc.diagnostics) == 1
     assert fc.diagnostics[0].message.splitlines()[0].startswith(message)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        'df.melt(id_vars="id", var_name="id")',
+        'df.melt(id_vars="id", value_name="id")',
+        'df.melt(var_name="v", value_name="v")',
+    ],
+)
+def test_melt_with_repeated_label_is_not_tracked(expr: str):
+    """pandas 3.0 gives duplicate columns, 3.1 raises ValueError."""
+    assert _checker_columns(expr) is None
 
 
 def test_melt_result_is_tracked():
