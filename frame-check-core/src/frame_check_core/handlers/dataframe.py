@@ -1,6 +1,7 @@
 import re
 
 from ..diagnostic import IllegalAccess
+from .expressions import missing_reads, parse_expression
 from .models import (
     DF,
     UNPACKED,
@@ -144,7 +145,6 @@ def df_pop(
 @DF.register("ffill")
 @DF.register("fillna")
 @DF.register("head")
-@DF.register("query")
 @DF.register("replace")
 @DF.register("round")
 @DF.register("sample")
@@ -171,6 +171,88 @@ def _same_columns(
     if idx_or_key(args, keywords, key="inplace") is True:
         return columns, None, error
     return columns, columns, error
+
+
+def _expression(args: list[Result], keywords: dict[str, Result]) -> Result:
+    return idx_or_key(args, keywords, idx=0, key="expr")
+
+
+def _expression_scope_is_plain(keywords: dict[str, Result]) -> bool:
+    """Whether names in the expression resolve to the frame's columns only.
+
+    `resolvers=` adds extra names and `target=` redirects assignments (bare
+    names never see local or global variables, so `local_dict`/`global_dict`
+    don't matter).
+    """
+    return (
+        UNPACKED not in keywords
+        and "resolvers" not in keywords
+        and "target" not in keywords
+        and keywords.get("parser", "pandas") == "pandas"
+    )
+
+
+@DF.register("query")
+def df_query(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Keeps the columns; names in the expression must be columns or index levels
+    # (`@var` refers to a local variable). Anything we can't analyze is ignored.
+    expr = _expression(args, keywords)
+    error = None
+    if isinstance(expr, str) and _expression_scope_is_plain(keywords):
+        lines = parse_expression(expr, multiline=False)
+        if (
+            lines is not None
+            and lines[0].target is None
+            and (missing := missing_reads(lines[0], columns))
+        ):
+            error = IllegalAccess(missing=missing)
+    updated, returned, _ = _same_columns(columns, args, keywords)
+    return updated, returned, error
+
+
+@DF.register("eval")
+def df_eval(
+    columns: set[str], args: list[Result], keywords: dict[str, Result]
+) -> DFFuncResult:
+    # Assignments ("C = A * 2") add columns, to a copy or in place; a plain
+    # expression evaluates to a Series (or scalar) instead of a frame.
+    inplace = Unknown if UNPACKED in keywords else keywords.get("inplace", False)
+    # What an assignment we can't resolve does to the original frame
+    unknown = None if inplace is True or inplace is Unknown else columns
+
+    expr = _expression(args, keywords)
+    lines = None
+    if isinstance(expr, str) and _expression_scope_is_plain(keywords):
+        lines = parse_expression(expr, multiline=True)
+    if lines is None:
+        return unknown, None, None
+
+    assigns = [line.target is not None for line in lines]
+    if len(lines) > 1 and not all(assigns):
+        return columns, None, None  # pandas raises; nothing to track
+
+    new_columns = set(columns)
+    missing: list[str] = []
+    for line in lines:
+        missing.extend(
+            name for name in missing_reads(line, new_columns) if name not in missing
+        )
+        if line.target_quoted:
+            # pandas stores backtick-quoted targets under a mangled name
+            return unknown, None, None
+        if line.target is not None:
+            new_columns.add(line.target)
+    error = IllegalAccess(missing=missing) if missing else None
+
+    if not assigns[0]:
+        return columns, None, error  # a Series, not a frame
+    if inplace is True:
+        return new_columns, None, error
+    if inplace is Unknown:
+        return None, None, error
+    return columns, new_columns, error
 
 
 # The column-preserving methods below raise KeyError for unknown labels in

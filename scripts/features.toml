@@ -202,8 +202,8 @@ supported = true
 title = "From eval"
 code = """df.eval('C = A * 2', inplace=True)"""
 description = "Creates columns using string expressions evaluated against the DataFrame."
-tested = false
-supported = false
+tested = true
+supported = true
 
 [column_assignment_methods.cam_16]
 title = "From query results"
